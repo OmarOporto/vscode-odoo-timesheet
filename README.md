@@ -11,7 +11,21 @@ Un panel en la barra lateral con dos vistas: **tus commits agrupados por día** 
 - Una instancia de Odoo 15–18 con los módulos **Proyecto** y **Hojas de horas** instalados
 - Tu usuario de Odoo debe tener una ficha de **Empleado** asociada: las hojas de horas la exigen
 
-## Instalarla (para usarla de verdad)
+## Instalarla
+
+### Desde un release (lo más rápido)
+
+Descarga el `.vsix` de la [última release](https://github.com/OmarOporto/vscode-odoo-timesheet/releases) y:
+
+```bash
+code --install-extension odoo-timesheet-<version>.vsix
+```
+
+O en VS Code: `Ctrl+Shift+P` → **«Extensions: Install from VSIX…»**.
+
+> Instalada así, **VS Code no busca actualizaciones**: no hay aviso ni insignia. Para actualizar hay que descargar el `.vsix` nuevo y repetir el comando (sobrescribe la versión anterior, no hace falta desinstalar).
+
+### Desde el código
 
 ```bash
 npm install

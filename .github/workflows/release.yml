@@ -1,0 +1,58 @@
+name: Release
+
+# Se dispara al empujar un tag v*. El ciclo completo para publicar una versión
+# nueva queda en dos comandos:
+#
+#   npm version patch          # sube la versión, hace commit y crea el tag
+#   git push --follow-tags     # esto lanza este workflow
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  # Necesario para que `gh release` pueda crear el release y subir el .vsix.
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # El tag manda, pero el número que acaba dentro del .vsix es el del
+      # manifiesto: si no coinciden, se publica un archivo que miente.
+      - name: Comprobar que el tag coincide con la versión del manifiesto
+        run: |
+          MANIFEST=$(node -p "require('./package.json').version")
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$MANIFEST" != "$TAG" ]; then
+            echo "::error::El tag ${GITHUB_REF_NAME} no coincide con la versión ${MANIFEST} de package.json"
+            exit 1
+          fi
+          echo "Versión ${MANIFEST}"
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - run: npm run package
+
+      # Se usa el `gh` que ya viene en el runner en vez de una acción de
+      # terceros: una dependencia menos en la que confiar para publicar.
+      - name: Crear el release y adjuntar el .vsix
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" ./*.vsix --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" ./*.vsix --generate-notes
+          fi

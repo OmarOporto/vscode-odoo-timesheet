@@ -1,0 +1,280 @@
+{
+  "name": "odoo-timesheet",
+  "displayName": "Odoo Timesheet",
+  "description": "Convierte tus commits diarios en líneas de horas en Odoo, sin salir de VS Code.",
+  "version": "0.1.0",
+  "publisher": "peyosolutions",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "keywords": [
+    "odoo",
+    "timesheet",
+    "git",
+    "horas"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onView:odooTimesheet.commits",
+    "onView:odooTimesheet.tasks"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "odooTimesheet",
+          "title": "Odoo Timesheet",
+          "icon": "media/odoo.svg"
+        }
+      ]
+    },
+    "views": {
+      "odooTimesheet": [
+        {
+          "id": "odooTimesheet.commits",
+          "name": "Commits por día"
+        },
+        {
+          "id": "odooTimesheet.tasks",
+          "name": "Tareas de Odoo"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "odooTimesheet.commits",
+        "contents": "No se encontró un repositorio git en este workspace.\nAbre una carpeta con un repositorio para ver tus commits agrupados por día.",
+        "when": "!odooTimesheet.hasRepo"
+      },
+      {
+        "view": "odooTimesheet.tasks",
+        "contents": "Conéctate a Odoo para ver tus tareas y registrar horas desde tus commits.\n[Conectar a Odoo](command:odooTimesheet.connect)",
+        "when": "!odooTimesheet.connected"
+      }
+    ],
+    "commands": [
+      {
+        "command": "odooTimesheet.connect",
+        "title": "Conectar a Odoo",
+        "category": "Odoo",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "odooTimesheet.disconnect",
+        "title": "Desconectar de Odoo",
+        "category": "Odoo",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "odooTimesheet.testConnection",
+        "title": "Probar conexión",
+        "category": "Odoo"
+      },
+      {
+        "command": "odooTimesheet.refreshCommits",
+        "title": "Refrescar commits",
+        "category": "Odoo",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "odooTimesheet.refreshTasks",
+        "title": "Refrescar tareas",
+        "category": "Odoo",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "odooTimesheet.searchTasks",
+        "title": "Buscar tareas",
+        "category": "Odoo",
+        "icon": "$(search)"
+      },
+      {
+        "command": "odooTimesheet.setDateRange",
+        "title": "Cambiar rango de días",
+        "category": "Odoo",
+        "icon": "$(calendar)"
+      },
+      {
+        "command": "odooTimesheet.logTime",
+        "title": "Registrar horas…",
+        "category": "Odoo",
+        "icon": "$(add)"
+      },
+      {
+        "command": "odooTimesheet.openTaskInBrowser",
+        "title": "Abrir en Odoo",
+        "category": "Odoo",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "odooTimesheet.copyCommitHash",
+        "title": "Copiar hash del commit",
+        "category": "Odoo"
+      },
+      {
+        "command": "odooTimesheet.showLog",
+        "title": "Mostrar registro de diagnóstico",
+        "category": "Odoo"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "odooTimesheet.setDateRange",
+          "when": "view == odooTimesheet.commits",
+          "group": "navigation@1"
+        },
+        {
+          "command": "odooTimesheet.refreshCommits",
+          "when": "view == odooTimesheet.commits",
+          "group": "navigation@2"
+        },
+        {
+          "command": "odooTimesheet.searchTasks",
+          "when": "view == odooTimesheet.tasks",
+          "group": "navigation@1"
+        },
+        {
+          "command": "odooTimesheet.refreshTasks",
+          "when": "view == odooTimesheet.tasks",
+          "group": "navigation@2"
+        },
+        {
+          "command": "odooTimesheet.connect",
+          "when": "view == odooTimesheet.tasks && !odooTimesheet.connected",
+          "group": "1_odoo@1"
+        },
+        {
+          "command": "odooTimesheet.disconnect",
+          "when": "view == odooTimesheet.tasks && odooTimesheet.connected",
+          "group": "1_odoo@1"
+        },
+        {
+          "command": "odooTimesheet.testConnection",
+          "when": "view == odooTimesheet.tasks",
+          "group": "1_odoo@2"
+        },
+        {
+          "command": "odooTimesheet.showLog",
+          "when": "view == odooTimesheet.tasks",
+          "group": "9_odoo@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "odooTimesheet.logTime",
+          "when": "view == odooTimesheet.commits && viewItem =~ /^(day|commit)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "odooTimesheet.logTime",
+          "when": "view == odooTimesheet.tasks && viewItem == task",
+          "group": "inline@1"
+        },
+        {
+          "command": "odooTimesheet.openTaskInBrowser",
+          "when": "view == odooTimesheet.tasks && viewItem == task",
+          "group": "1_odoo@1"
+        },
+        {
+          "command": "odooTimesheet.copyCommitHash",
+          "when": "viewItem == commit",
+          "group": "1_git@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "odooTimesheet.copyCommitHash",
+          "when": "false"
+        },
+        {
+          "command": "odooTimesheet.openTaskInBrowser",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Odoo Timesheet",
+      "properties": {
+        "odooTimesheet.url": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "URL base de tu instancia de Odoo, por ejemplo `https://miempresa.odoo.com`. Sin `/web` ni rutas al final."
+        },
+        "odooTimesheet.db": {
+          "type": "string",
+          "default": "",
+          "description": "Nombre de la base de datos de Odoo. Si lo dejas vacío se intentará detectar automáticamente al conectar."
+        },
+        "odooTimesheet.username": {
+          "type": "string",
+          "default": "",
+          "description": "Tu login de Odoo, normalmente tu correo electrónico."
+        },
+        "odooTimesheet.daysBack": {
+          "type": "number",
+          "default": 14,
+          "minimum": 1,
+          "maximum": 365,
+          "description": "Cuántos días de historial de commits mostrar en el panel."
+        },
+        "odooTimesheet.onlyMyCommits": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Mostrar solo los commits cuyo autor coincide con tu `git config user.email`."
+        },
+        "odooTimesheet.includeMerges": {
+          "type": "boolean",
+          "default": false,
+          "description": "Incluir commits de merge en el listado."
+        },
+        "odooTimesheet.taskScope": {
+          "type": "string",
+          "enum": [
+            "assigned",
+            "all"
+          ],
+          "enumDescriptions": [
+            "Solo las tareas donde estás asignado.",
+            "Todas las tareas que puedes ver en Odoo."
+          ],
+          "default": "assigned",
+          "description": "Qué tareas listar en el panel de Odoo."
+        },
+        "odooTimesheet.taskLimit": {
+          "type": "number",
+          "default": 50,
+          "minimum": 5,
+          "maximum": 500,
+          "description": "Número máximo de tareas a cargar por consulta."
+        },
+        "odooTimesheet.allowInsecureTLS": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Inseguro.** Acepta certificados TLS no verificables. Actívalo solo para una instancia on-premise con certificado autofirmado en la que confíes."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs --production",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node test/git.test.mjs && node test/odoo.test.mjs",
+    "check": "npm run typecheck && npm run build && npm test",
+    "vscode:prepublish": "npm run build",
+    "package": "npx --yes @vscode/vsce package --allow-missing-repository --skip-license"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  }
+}

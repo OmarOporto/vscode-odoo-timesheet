@@ -57,6 +57,14 @@ Tu API key **no** hay que volver a escribirla: VS Code guarda los secretos siemp
 npm run watch     # esbuild en modo watch
 ```
 
+Para publicar una versión, **usa siempre `npm version`**:
+
+```bash
+npm version patch && git push --follow-tags
+```
+
+El hook `version` de npm sincroniza `displayName` («Odoo Timesheet 0.1.2») dentro del mismo commit, y el workflow de release rechaza publicar si los dos números no coinciden.
+
 **F5** abre una ventana de desarrollo. Hay dos configuraciones:
 
 - **Ejecutar extensión** — abre la última carpeta que usaras.
@@ -69,6 +77,7 @@ npm run watch     # esbuild en modo watch
 3. La vista **Tareas de Odoo** muestra tus **proyectos**; al desplegar uno se cargan sus tareas.
 4. Botón **+** sobre un día, un commit, un proyecto o una tarea → **Registrar horas**:
    - eliges los commits,
+   - eliges **con qué fecha** registrarlos: hoy, la del commit, u otra,
    - eliges el proyecto (se salta si ya venías de uno, o si tienes uno fijado),
    - buscas la tarea por nombre o número, **o creas una nueva** con `➕ Crear tarea nueva…`,
    - decides si va **una línea por día** o **una línea por commit**,
@@ -82,7 +91,9 @@ La descripción se propone con el **mensaje completo** de cada commit —título
 
 **Fijar un proyecto** (icono 📌 sobre el proyecto, o `Odoo: Elegir proyecto`) deja el panel en lista plana con solo esas tareas, y hace que el flujo de registro se salte el paso de proyecto. Se guarda en `settings.json`, así que sobrevive a reinicios.
 
-> Si seleccionas commits de varios días en modo agrupado, se crea **una línea por día**: registrar el trabajo del lunes con fecha de hoy falsearía la hoja de horas.
+**La fecha** se pregunta solo cuando aporta algo: si todos los commits son de hoy, el paso se salta. Si prefieres no decidirlo cada vez, `odooTimesheet.lineDate` acepta `today` o `commit` y el diálogo desaparece.
+
+> Cuidado con una consecuencia: si eliges **una fecha única** para commits de varios días, el modo agrupado crea **una sola línea** con todo — dos líneas con la misma fecha y la misma tarea no aportarían nada. Con **la fecha del commit** sí se crea una línea por día.
 
 ## Autenticación
 
@@ -142,6 +153,7 @@ Bloque completo listo para pegar:
 | `odooTimesheet.onlyMyCommits` | `true` | Filtra por tu `git config user.email` |
 | `odooTimesheet.includeMerges` | `false` | Incluir commits de merge |
 | `odooTimesheet.taskScope` | `mine` | `mine`, `assigned`, `timesheet` o `all` |
+| `odooTimesheet.lineDate` | `ask` | `ask`, `today` o `commit` |
 | `odooTimesheet.taskOrder` | `created` | `created`, `updated` o `name` |
 | `odooTimesheet.tasksPerProject` | `10` | Tareas por proyecto antes de «Mostrar más» |
 | `odooTimesheet.taskLimit` | `50` | Máximo de tareas en las **búsquedas** |

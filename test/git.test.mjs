@@ -44,6 +44,7 @@ const vscodeStub = {
 for (const [entry, out] of [
   ['src/git/gitService.ts', 'gitService.cjs'],
   ['src/util.ts', 'util.cjs'],
+  ['src/lines.ts', 'lines.cjs'],
 ]) {
   await esbuild.build({
     entryPoints: [path.join(PROJECT, entry)],
@@ -59,6 +60,7 @@ for (const [entry, out] of [
 const require = createRequire(import.meta.url);
 const git = require(path.join(TMP, 'gitService.cjs'));
 const util = require(path.join(TMP, 'util.cjs'));
+const lines = require(path.join(TMP, 'lines.cjs'));
 
 // --- Repositorios de prueba -------------------------------------------------
 const initRepo = (root) => {
@@ -229,6 +231,68 @@ assert.match(
   /Elegir repositorio/,
   'y explica cómo arreglarlo en vez de fallar en silencio',
 );
+
+// --- planLines: cuántas líneas y con qué fecha ------------------------------
+// Cuatro commits míos repartidos en TRES días: hoy, ayer (×2) y hace 40.
+const spread = await git.readCommits(REPO, {
+  days: 365,
+  authorEmail: 'dev+test@example.com',
+  includeMerges: false,
+});
+assert.equal(spread.length, 4);
+const FIXED = { kind: 'fixed', day: '2026-09-15' };
+const PER_DAY = { kind: 'perCommitDay' };
+
+const groupedFixed = lines.planLines(spread, FIXED, 'grouped');
+assert.equal(groupedFixed.length, 1, 'agrupado con fecha fija debe dar UNA sola línea');
+assert.equal(groupedFixed[0].day, '2026-09-15');
+assert.equal(groupedFixed[0].commits.length, 4, 'y llevarse todos los commits');
+
+const groupedPerDay = lines.planLines(spread, PER_DAY, 'grouped');
+assert.deepEqual(
+  groupedPerDay.map((draft) => draft.day),
+  [today, yesterday, day(40)],
+  'agrupado por día: una línea por día, la más reciente primero',
+);
+assert.deepEqual(
+  groupedPerDay.map((draft) => draft.commits.length),
+  [1, 2, 1],
+);
+
+const perCommitFixed = lines.planLines(spread, FIXED, 'per-commit');
+assert.equal(perCommitFixed.length, 4);
+assert.ok(
+  perCommitFixed.every((draft) => draft.day === '2026-09-15'),
+  'por commit con fecha fija: todas comparten fecha',
+);
+assert.ok(perCommitFixed.every((draft) => draft.commits.length === 1));
+
+const perCommitPerDay = lines.planLines(spread, PER_DAY, 'per-commit');
+assert.deepEqual(
+  perCommitPerDay.map((draft) => draft.day),
+  [today, yesterday, yesterday, day(40)],
+  'por commit sin fecha fija: cada uno con su día, en orden cronológico',
+);
+
+// El orden de entrada no debe importar: showQuickPick no lo garantiza.
+const shuffled = [spread[2], spread[0], spread[3], spread[1]];
+assert.deepEqual(
+  lines.planLines(shuffled, PER_DAY, 'per-commit').map((draft) => draft.commits[0].hash),
+  perCommitPerDay.map((draft) => draft.commits[0].hash),
+  'planLines reordena por sí mismo',
+);
+
+assert.deepEqual(lines.planLines([], FIXED, 'grouped'), [], 'sin commits, sin líneas');
+
+// --- parseIsoDay ------------------------------------------------------------
+assert.equal(util.parseIsoDay('2026-08-31'), '2026-08-31');
+assert.equal(util.parseIsoDay('  2026-08-31  '), '2026-08-31', 'tolera espacios');
+assert.equal(util.parseIsoDay('2026-02-31'), undefined, 'febrero no tiene 31: new Date lo colaría');
+assert.equal(util.parseIsoDay('2026-13-01'), undefined);
+assert.equal(util.parseIsoDay('31/08/2026'), undefined);
+assert.equal(util.parseIsoDay('2026-8-1'), undefined, 'exige dos dígitos');
+assert.equal(util.parseIsoDay(''), undefined);
+assert.equal(util.parseIsoDay('2024-02-29'), '2024-02-29', 'año bisiesto sí');
 
 assert.equal(git.repositoryLabel(REPO_B), 'fixture-repo-b');
 assert.equal(git.resolveGitRoot(REPO), REPO, 'la raíz se resuelve a sí misma');

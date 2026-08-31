@@ -12,6 +12,29 @@ export function todayLocalDay(): string {
   return toLocalDay(new Date());
 }
 
+/**
+ * Valida una fecha escrita a mano en formato `YYYY-MM-DD`.
+ *
+ * Comprueba que el día exista de verdad: `new Date(2026, 1, 31)` normaliza a
+ * marzo sin avisar, así que el formato correcto no basta.
+ */
+export function parseIsoDay(text: string): string | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text.trim());
+  if (!match) {
+    return undefined;
+  }
+  const [, year, month, day] = match;
+  const date = new Date(Number(year), Number(month) - 1, Number(day));
+  if (
+    date.getFullYear() !== Number(year) ||
+    date.getMonth() !== Number(month) - 1 ||
+    date.getDate() !== Number(day)
+  ) {
+    return undefined;
+  }
+  return `${year}-${month}-${day}`;
+}
+
 /** El día local de hace N días, `YYYY-MM-DD`. */
 export function daysAgo(days: number, today = new Date()): string {
   return toLocalDay(new Date(today.getFullYear(), today.getMonth(), today.getDate() - days));

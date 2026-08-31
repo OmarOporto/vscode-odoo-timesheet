@@ -11,6 +11,7 @@ import {
   type TaskOrder,
   type TaskScope,
 } from '../odoo/tasks';
+import { planLines, type LineDate, type LineDraft, type LineMode } from '../lines';
 import { createTimesheetLines, type TimesheetLineInput } from '../odoo/timesheets';
 import { readPinnedProject, type OdooSession } from '../state';
 import {
@@ -19,6 +20,7 @@ import {
   formatTaskDate,
   joinCommitText,
   parseHours,
+  parseIsoDay,
   pluralize,
   todayLocalDay,
   truncate,
@@ -33,8 +35,6 @@ export interface LogTimeDeps {
   tasks: TasksTreeProvider;
   log: vscode.LogOutputChannel;
 }
-
-type LineMode = 'grouped' | 'per-commit';
 
 /**
  * Tope de la descripción sugerida. Odoo no impone ninguno, pero la rejilla de
@@ -109,6 +109,16 @@ async function run(deps: LogTimeDeps, node?: unknown): Promise<void> {
     return;
   }
 
+  // La fecha se decide aquí, antes que la tarea, porque el nombre que se propone
+  // para una tarea nueva lleva su prefijo: proponer «08/29 …» para imputarlo el
+  // 31 contradiría la convención de una tarea por día.
+  const lineDate = await resolveLineDate(selected);
+  if (!lineDate) {
+    return;
+  }
+  const nameDay =
+    lineDate.kind === 'fixed' ? lineDate.day : (groupByDay(selected)[0]?.day ?? todayLocalDay());
+
   if (!presetTask && projectId === undefined) {
     const choice = await pickProject(session, {
       title: 'Proyecto de la tarea',
@@ -120,7 +130,7 @@ async function run(deps: LogTimeDeps, node?: unknown): Promise<void> {
     projectId = choice.id;
   }
 
-  const suggestedName = suggestTaskName(selected);
+  const suggestedName = suggestTaskName(selected, nameDay);
   const picked = presetTask
     ? { kind: 'existing' as const, task: presetTask }
     : await pickTask(deps, projectId, suggestedName);
@@ -149,10 +159,7 @@ async function run(deps: LogTimeDeps, node?: unknown): Promise<void> {
     return;
   }
 
-  const lines =
-    mode === 'grouped'
-      ? await buildGroupedLines(selected, task.id, project.id)
-      : await buildPerCommitLines(selected, task.id, project.id);
+  const lines = await buildLines(planLines(selected, lineDate, mode), mode, task.id, project.id);
   if (!lines || lines.length === 0) {
     return;
   }
@@ -355,18 +362,92 @@ function pickTask(
   });
 }
 
-/** Nombre propuesto para la tarea del día, con el prefijo de fecha configurado. */
-function suggestTaskName(commits: Commit[]): string {
+/**
+ * Nombre propuesto para la tarea, con el prefijo de fecha configurado. El día
+ * llega resuelto desde el flujo para que coincida con el de las líneas.
+ */
+function suggestTaskName(commits: Commit[], day: string): string {
   const format = vscode.workspace
     .getConfiguration('odooTimesheet')
     .get<string>('taskNameDateFormat', 'MM/DD');
-  // El día de los commits seleccionados, no el de hoy.
-  const day = groupByDay(commits)[0]?.day ?? todayLocalDay();
   const subjects = commits
     .map((commit) => commit.subject)
     .filter(Boolean)
     .join(', ');
   return truncate([formatTaskDate(day, format), subjects].filter(Boolean).join(' '), 180);
+}
+
+type LineDatePreference = 'ask' | 'today' | 'commit';
+
+interface DateItem extends vscode.QuickPickItem {
+  value: LineDate | 'custom';
+}
+
+/**
+ * Decide con qué fecha se registran las horas. Con `ask`, se salta el diálogo
+ * cuando todos los commits son de hoy: ahí las dos respuestas serían la misma y
+ * el caso habitual no debe costar ni una pulsación.
+ */
+async function resolveLineDate(commits: Commit[]): Promise<LineDate | undefined> {
+  const preference = vscode.workspace
+    .getConfiguration('odooTimesheet')
+    .get<LineDatePreference>('lineDate', 'ask');
+  const today = todayLocalDay();
+
+  if (preference === 'today') {
+    return { kind: 'fixed', day: today };
+  }
+  if (preference === 'commit') {
+    return { kind: 'perCommitDay' };
+  }
+
+  const days = [...new Set(commits.map((commit) => commit.day))];
+  if (days.length === 1 && days[0] === today) {
+    return { kind: 'fixed', day: today };
+  }
+
+  const items: DateItem[] = [
+    {
+      label: '$(calendar) Hoy',
+      description: today,
+      value: { kind: 'fixed', day: today },
+    },
+    {
+      label: '$(git-commit) Fecha del commit',
+      description:
+        days.length === 1
+          ? `${formatDayLabel(days[0])} · ${days[0]}`
+          : `cada commit con su día · ${pluralize(days.length, 'día', 'días')}`,
+      value: { kind: 'perCommitDay' },
+    },
+    {
+      label: '$(edit) Otra fecha…',
+      description: 'YYYY-MM-DD',
+      value: 'custom',
+    },
+  ];
+
+  const picked = await vscode.window.showQuickPick(items, {
+    title: '¿Con qué fecha registrar las horas?',
+    ignoreFocusOut: true,
+  });
+  if (!picked) {
+    return undefined;
+  }
+  if (picked.value !== 'custom') {
+    return picked.value;
+  }
+
+  const input = await vscode.window.showInputBox({
+    title: 'Fecha de la línea de horas',
+    prompt: 'Formato YYYY-MM-DD',
+    value: today,
+    ignoreFocusOut: true,
+    validateInput: (text) =>
+      parseIsoDay(text) === undefined ? 'Escribe una fecha real en formato YYYY-MM-DD.' : undefined,
+  });
+  const day = input === undefined ? undefined : parseIsoDay(input);
+  return day ? { kind: 'fixed', day } : undefined;
 }
 
 async function createTaskInteractively(
@@ -443,61 +524,53 @@ async function pickMode(commitCount: number): Promise<LineMode | undefined> {
   return picked?.mode;
 }
 
-async function buildGroupedLines(
-  commits: Commit[],
+/**
+ * Recorre los borradores que decidió `planLines` y pide lo que falta. En modo
+ * por commit no se pregunta la descripción: ya hay un diálogo de horas por
+ * commit y encadenar 2N cajas sería insufrible.
+ */
+async function buildLines(
+  drafts: LineDraft[],
+  mode: LineMode,
   taskId: number,
   projectId: number,
 ): Promise<TimesheetLineInput[] | undefined> {
   const lines: TimesheetLineInput[] = [];
 
-  // Si la selección abarca varios días se crea una línea por día: imputar el
-  // trabajo del lunes con fecha de hoy falsearía la hoja de horas.
-  for (const group of groupByDay(commits)) {
-    const texts = group.commits
-      .map((commit) => joinCommitText(commit.subject, commit.body))
-      .filter(Boolean);
-
-    const hours = await askHours(
-      `${formatDayLabel(group.day)} (${group.day}) · ${pluralize(group.commits.length, 'commit', 'commits')}`,
+  for (const draft of drafts) {
+    const suggested = truncate(
+      draft.commits
+        .map((commit) => joinCommitText(commit.subject, commit.body))
+        .filter(Boolean)
+        .join('; '),
+      MAX_DESCRIPTION,
     );
+
+    const hours = await askHours(describeDraft(draft, mode));
     if (hours === undefined) {
       return undefined;
     }
 
-    const description = await askDescription(truncate(texts.join('; '), MAX_DESCRIPTION));
+    const description =
+      mode === 'per-commit'
+        ? suggested || draft.commits[0].shortHash
+        : await askDescription(suggested);
     if (description === undefined) {
       return undefined;
     }
 
-    lines.push({ date: group.day, description, hours, taskId, projectId });
+    lines.push({ date: draft.day, description, hours, taskId, projectId });
   }
 
   return lines;
 }
 
-async function buildPerCommitLines(
-  commits: Commit[],
-  taskId: number,
-  projectId: number,
-): Promise<TimesheetLineInput[] | undefined> {
-  const lines: TimesheetLineInput[] = [];
-
-  for (const commit of commits) {
-    const hours = await askHours(`«${truncate(commit.subject || commit.shortHash, 60)}»`);
-    if (hours === undefined) {
-      return undefined;
-    }
-    lines.push({
-      date: commit.day,
-      description:
-        truncate(joinCommitText(commit.subject, commit.body), MAX_DESCRIPTION) || commit.shortHash,
-      hours,
-      taskId,
-      projectId,
-    });
+function describeDraft(draft: LineDraft, mode: LineMode): string {
+  if (mode === 'per-commit') {
+    const commit = draft.commits[0];
+    return `«${truncate(commit.subject || commit.shortHash, 60)}» · ${draft.day}`;
   }
-
-  return lines;
+  return `${formatDayLabel(draft.day)} (${draft.day}) · ${pluralize(draft.commits.length, 'commit', 'commits')}`;
 }
 
 async function askHours(prompt: string): Promise<number | undefined> {

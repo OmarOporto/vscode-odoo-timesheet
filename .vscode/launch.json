@@ -8,6 +8,23 @@
       "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
       "outFiles": ["${workspaceFolder}/dist/**/*.js"],
       "preLaunchTask": "${defaultBuildTask}"
+    },
+    {
+      // --extensionDevelopmentPath abre una ventana SIN carpeta y VS Code
+      // restaura la última usada. El primer argumento posicional fuerza cuál.
+      "name": "Ejecutar extensión en otra carpeta…",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["${input:repoFolder}", "--extensionDevelopmentPath=${workspaceFolder}"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "preLaunchTask": "${defaultBuildTask}"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "repoFolder",
+      "type": "promptString",
+      "description": "Ruta de una carpeta con un repositorio git para probar la extensión"
     }
   ]
 }

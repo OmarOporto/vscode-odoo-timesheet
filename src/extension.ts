@@ -1,10 +1,24 @@
 import * as vscode from 'vscode';
-import { connectCommand, disconnectCommand, testConnectionCommand } from './commands/connect';
+import {
+  changePasswordCommand,
+  connectCommand,
+  disconnectCommand,
+  logConfiguration,
+  testConnectionCommand,
+} from './commands/connect';
+import { diagnoseTasksCommand } from './commands/diagnose';
 import { logTimeCommand } from './commands/logTime';
+import {
+  describeTasksView,
+  pinProjectCommand,
+  selectProjectCommand,
+  unpinProjectCommand,
+} from './commands/projects';
+import { selectRepositoryCommand } from './commands/repository';
 import { recordUrl } from './odoo/tasks';
 import { OdooSession } from './state';
 import { CommitNode, CommitsTreeProvider } from './views/commitsTree';
-import { TaskNode, TasksTreeProvider } from './views/tasksTree';
+import { ProjectNode, ShowMoreNode, TaskNode, TasksTreeProvider } from './views/tasksTree';
 
 export function activate(context: vscode.ExtensionContext): void {
   const log = vscode.window.createOutputChannel('Odoo Timesheet', { log: true });
@@ -19,7 +33,19 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   const tasksView = vscode.window.createTreeView('odooTimesheet.tasks', {
     treeDataProvider: tasksProvider,
+    showCollapseAll: true,
   });
+
+  const syncTasksHeader = (): void => {
+    tasksView.description = describeTasksView(tasksProvider.currentFilter);
+  };
+  const syncCommitsHeader = (): void => {
+    void commitsProvider.describeRepositories().then((description) => {
+      commitsView.description = description;
+    });
+  };
+  syncTasksHeader();
+  syncCommitsHeader();
 
   const deps = { session, commits: commitsProvider, tasks: tasksProvider, log };
 
@@ -31,15 +57,68 @@ export function activate(context: vscode.ExtensionContext): void {
     commitsView,
     tasksView,
 
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('odooTimesheet.projectId')) {
+        syncTasksHeader();
+      }
+      if (event.affectsConfiguration('odooTimesheet.repositoryPath')) {
+        syncCommitsHeader();
+      }
+    }),
+    commitsProvider.onDidChangeTreeData(() => syncCommitsHeader()),
+
     vscode.commands.registerCommand('odooTimesheet.connect', () => connectCommand(session, log)),
     vscode.commands.registerCommand('odooTimesheet.disconnect', () => disconnectCommand(session)),
+    vscode.commands.registerCommand('odooTimesheet.changePassword', () =>
+      changePasswordCommand(session, log),
+    ),
     vscode.commands.registerCommand('odooTimesheet.testConnection', () =>
       testConnectionCommand(session, log),
     ),
-    vscode.commands.registerCommand('odooTimesheet.showLog', () => log.show()),
+    vscode.commands.registerCommand('odooTimesheet.diagnoseTasks', () =>
+      diagnoseTasksCommand(session, log),
+    ),
+    vscode.commands.registerCommand('odooTimesheet.showLog', () => {
+      logConfiguration(log);
+      log.show();
+    }),
+
+    vscode.commands.registerCommand('odooTimesheet.openSettings', () =>
+      // El id sale del propio contexto: así no hay que mantener sincronizado el
+      // publisher con una cadena escrita a mano.
+      vscode.commands.executeCommand('workbench.action.openSettings', `@ext:${context.extension.id}`),
+    ),
+    vscode.commands.registerCommand('odooTimesheet.openSettingsJson', () =>
+      vscode.commands.executeCommand('workbench.action.openSettingsJson'),
+    ),
 
     vscode.commands.registerCommand('odooTimesheet.refreshCommits', () => commitsProvider.refresh()),
     vscode.commands.registerCommand('odooTimesheet.refreshTasks', () => tasksProvider.refresh()),
+
+    vscode.commands.registerCommand('odooTimesheet.selectRepository', () =>
+      selectRepositoryCommand(log),
+    ),
+    vscode.commands.registerCommand('odooTimesheet.showMoreTasks', (node?: unknown) => {
+      if (node instanceof ShowMoreNode) {
+        tasksProvider.showMore(node);
+      }
+    }),
+
+    vscode.commands.registerCommand('odooTimesheet.selectProject', async () => {
+      await selectProjectCommand(session);
+      syncTasksHeader();
+    }),
+    vscode.commands.registerCommand('odooTimesheet.pinProject', async (node?: unknown) => {
+      if (!(node instanceof ProjectNode)) {
+        return;
+      }
+      await pinProjectCommand({ id: node.project.id, name: node.project.name });
+      syncTasksHeader();
+    }),
+    vscode.commands.registerCommand('odooTimesheet.unpinProject', async () => {
+      await unpinProjectCommand();
+      syncTasksHeader();
+    }),
 
     vscode.commands.registerCommand('odooTimesheet.searchTasks', async () => {
       const filter = await vscode.window.showInputBox({
@@ -51,9 +130,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       tasksProvider.setFilter(filter);
-      tasksView.description = tasksProvider.currentFilter
-        ? `filtro: ${tasksProvider.currentFilter}`
-        : undefined;
+      syncTasksHeader();
     }),
 
     vscode.commands.registerCommand('odooTimesheet.setDateRange', async () => {
@@ -91,13 +168,24 @@ export function activate(context: vscode.ExtensionContext): void {
       logTimeCommand(deps, node),
     ),
 
-    vscode.commands.registerCommand('odooTimesheet.openTaskInBrowser', async (node?: unknown) => {
+    vscode.commands.registerCommand('odooTimesheet.openInBrowser', async (node?: unknown) => {
       const connection = session.connection;
-      if (!(node instanceof TaskNode) || !connection) {
+      if (!connection) {
+        return;
+      }
+      const target =
+        node instanceof TaskNode
+          ? { model: 'project.task', id: node.task.id }
+          : node instanceof ProjectNode
+            ? { model: 'project.project', id: node.project.id }
+            : undefined;
+      if (!target) {
         return;
       }
       await vscode.env.openExternal(
-        vscode.Uri.parse(recordUrl(connection.client.url, 'project.task', node.task.id)),
+        vscode.Uri.parse(
+          recordUrl(connection.client.url, connection.client.majorVersion, target.model, target.id),
+        ),
       );
     }),
 

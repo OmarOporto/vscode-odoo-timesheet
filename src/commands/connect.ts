@@ -1,17 +1,30 @@
 import * as vscode from 'vscode';
-import { normalizeBaseUrl, OdooClient, OdooError } from '../odoo/client';
-import { searchTasks } from '../odoo/tasks';
+import {
+  MISSING_DB,
+  MISSING_USERNAME,
+  normalizeBaseUrl,
+  OdooClient,
+  OdooError,
+} from '../odoo/client';
+import { listProjects, searchTasks } from '../odoo/tasks';
 import { readSettings, type OdooSession } from '../state';
 
 const GLOBAL = vscode.ConfigurationTarget.Global;
 
+/**
+ * Flujo de conexión.
+ *
+ * Con JSON-2 basta la URL y una API key: la propia key identifica al usuario y
+ * la base de datos. La base y el usuario solo se piden cuando hay que caer al
+ * transporte antiguo, que sí los necesita — el transporte lo señala con los
+ * marcadores MISSING_DB / MISSING_USERNAME.
+ */
 export async function connectCommand(
   session: OdooSession,
   log: vscode.LogOutputChannel,
 ): Promise<void> {
   const config = vscode.workspace.getConfiguration('odooTimesheet');
   const settings = readSettings();
-  const insecure = settings.allowInsecureTLS;
 
   const url = settings.url || (await askUrl());
   if (!url) {
@@ -21,48 +34,67 @@ export async function connectCommand(
     await config.update('url', url, GLOBAL);
   }
 
-  const username = settings.username || (await askUsername());
-  if (!username) {
-    return;
-  }
-  if (username !== settings.username) {
-    await config.update('username', username, GLOBAL);
-  }
+  let password = await session.readPassword();
+  let db = settings.db;
+  let username = settings.username;
 
-  const db = settings.db || (await resolveDatabase(url, insecure, log));
-  if (!db) {
-    return;
-  }
-  if (db !== settings.db) {
-    await config.update('db', db, GLOBAL);
-  }
-
-  let stored = await session.readPassword();
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const password = stored ?? (await askPassword());
+  for (let attempt = 0; attempt < 5; attempt += 1) {
     if (!password) {
-      return;
+      password = await askPassword();
+      if (!password) {
+        return;
+      }
     }
 
     try {
       const connection = await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: `Conectando a ${url}…` },
-        () => session.connect({ url, db, username, password, allowInsecureTLS: insecure }),
+        () =>
+          session.connect(
+            { url, db, username, password: password as string, allowInsecureTLS: settings.allowInsecureTLS },
+            settings.api,
+          ),
       );
+
       await session.storePassword(password);
+      // Con JSON-2 el login lo descubre el servidor: se guarda para que la
+      // configuración quede legible y para una eventual caída a JSON-RPC.
+      if (connection.client.login && connection.client.login !== username) {
+        await config.update('username', connection.client.login, GLOBAL);
+      }
+
       void vscode.window.showInformationMessage(
-        `Conectado a Odoo ${connection.schema.serverVersion} como ${username}.`,
+        `Conectado a Odoo ${connection.schema.serverVersion} como ${connection.client.login} (API ${connection.client.api}).`,
       );
       return;
     } catch (error) {
+      const odooError = error instanceof OdooError ? error : undefined;
       const message = error instanceof Error ? error.message : String(error);
       log.error(`Fallo al conectar: ${message}`);
 
-      const isAuthProblem = error instanceof OdooError && error.kind === 'auth';
-      if (isAuthProblem && attempt < 2) {
+      if (odooError?.detail === MISSING_DB) {
+        const resolved = await resolveDatabase(url, settings.allowInsecureTLS, log);
+        if (!resolved) {
+          return;
+        }
+        db = resolved;
+        await config.update('db', db, GLOBAL);
+        continue;
+      }
+
+      if (odooError?.detail === MISSING_USERNAME) {
+        const resolved = await askUsername();
+        if (!resolved) {
+          return;
+        }
+        username = resolved;
+        await config.update('username', username, GLOBAL);
+        continue;
+      }
+
+      if (odooError?.kind === 'auth' && attempt < 3) {
         await session.clearPassword();
-        stored = undefined;
+        password = undefined;
         const retry = await vscode.window.showErrorMessage(message, 'Reintentar');
         if (retry !== 'Reintentar') {
           return;
@@ -92,11 +124,29 @@ export async function disconnectCommand(session: OdooSession): Promise<void> {
   }
 }
 
+/** SecretStorage no se puede editar a mano: esta es la única vía de cambiarla. */
+export async function changePasswordCommand(
+  session: OdooSession,
+  log: vscode.LogOutputChannel,
+): Promise<void> {
+  const password = await askPassword();
+  if (!password) {
+    return;
+  }
+  await session.storePassword(password);
+  await session.disconnect();
+  await connectCommand(session, log);
+}
+
 export async function testConnectionCommand(
   session: OdooSession,
   log: vscode.LogOutputChannel,
 ): Promise<void> {
+  logConfiguration(log);
+
   if (!session.isConnected) {
+    log.warn('Sin conexión activa: se abrirá el flujo de conexión.');
+    log.show();
     await connectCommand(session, log);
     return;
   }
@@ -106,25 +156,28 @@ export async function testConnectionCommand(
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Probando la conexión con Odoo…' },
       async () => {
-        const serverVersion = await client.version();
         const tasks = await searchTasks(client, schema, { scope: 'assigned', limit: 1 });
+        const projects = await listProjects(client, schema, { limit: 5 });
         const employeeId = await session.getEmployeeId();
 
         log.info(
           [
             'Prueba de conexión correcta:',
-            `  URL           ${client.url}`,
-            `  Base de datos ${client.db}`,
-            `  Usuario       ${client.login} (uid ${client.userId})`,
-            `  Versión       ${serverVersion}`,
-            `  Asignado      ${schema.assigneeField}`,
-            `  Empleado      id ${employeeId}`,
-            `  Tareas        ${tasks.length > 0 ? 'lectura correcta' : 'sin tareas asignadas'}`,
+            `  URL            ${client.url}`,
+            `  Transporte     ${client.api}`,
+            `  Base de datos  ${client.db ?? '(no aplica en JSON-2)'}`,
+            `  Usuario        ${client.login} (uid ${client.userId})`,
+            `  Versión        ${schema.serverVersion} (mayor ${schema.majorVersion})`,
+            `  Asignado       ${schema.assigneeField}`,
+            `  Empleado       id ${employeeId}`,
+            `  Proyectos      ${projects.length} legibles`,
+            `  Tareas         ${tasks.length > 0 ? 'lectura correcta' : 'sin tareas asignadas'}`,
           ].join('\n'),
         );
+
         void vscode.window
           .showInformationMessage(
-            `Odoo ${serverVersion} · uid ${client.userId} · empleado ${employeeId}.`,
+            `Odoo ${schema.serverVersion} vía ${client.api} · uid ${client.userId} · empleado ${employeeId}.`,
             'Ver detalles',
           )
           .then((action) => {
@@ -145,11 +198,63 @@ export async function testConnectionCommand(
   }
 }
 
+/**
+ * Vuelca la configuración resuelta y **de qué ámbito viene cada valor**, que es
+ * justo lo que hace falta para saber qué archivo editar a mano.
+ */
+export function logConfiguration(log: vscode.LogOutputChannel): void {
+  const config = vscode.workspace.getConfiguration('odooTimesheet');
+  const keys = [
+    'url',
+    'db',
+    'username',
+    'api',
+    'daysBack',
+    'onlyMyCommits',
+    'includeMerges',
+    'taskScope',
+    'taskLimit',
+    'projectId',
+    'projectName',
+    'allowInsecureTLS',
+  ];
+
+  const lines = keys.map((key) => {
+    const value = config.get(key);
+    const printable = value === '' ? '(vacío)' : JSON.stringify(value);
+    return `  odooTimesheet.${key.padEnd(17)} = ${printable}  [${origin(config, key)}]`;
+  });
+
+  log.info(
+    [
+      'Configuración actual (el ámbito indica dónde se está definiendo cada valor):',
+      ...lines,
+      '  La contraseña / API key NO está aquí: vive en el almacén de secretos de VS Code',
+      '  (Administrador de credenciales de Windows). Cámbiala con «Odoo: Cambiar contraseña o API key».',
+    ].join('\n'),
+  );
+}
+
+function origin(config: vscode.WorkspaceConfiguration, key: string): string {
+  const inspected = config.inspect(key);
+  if (inspected?.workspaceFolderValue !== undefined) {
+    return 'carpeta';
+  }
+  if (inspected?.workspaceValue !== undefined) {
+    return 'workspace: .vscode/settings.json';
+  }
+  if (inspected?.globalValue !== undefined) {
+    return 'usuario: settings.json';
+  }
+  return 'por defecto';
+}
+
 function askUrl(): Thenable<string | undefined> {
   return vscode.window
     .showInputBox({
       title: 'URL de Odoo',
-      prompt: 'Por ejemplo https://miempresa.odoo.com',
+      prompt: 'Puedes pegar la URL de cualquier página de Odoo: se recorta sola a la base.',
+      placeHolder: 'https://miempresa.odoo.com',
       ignoreFocusOut: true,
       validateInput: (value) => {
         try {
@@ -178,7 +283,7 @@ function askPassword(): Thenable<string | undefined> {
   return vscode.window.showInputBox({
     title: 'Contraseña o API key de Odoo',
     prompt:
-      'Si tu cuenta tiene verificación en dos pasos, la contraseña no sirve para la API: usa una API key (Preferencias → Seguridad de la cuenta → Nueva clave de API).',
+      'Odoo 19 y superior requieren una API key (Preferencias → Seguridad de la cuenta → Nueva clave de API). La contraseña solo sirve en versiones anteriores y sin verificación en dos pasos.',
     password: true,
     ignoreFocusOut: true,
     validateInput: (value) => (value ? undefined : 'No puede estar vacía.'),
@@ -186,8 +291,8 @@ function askPassword(): Thenable<string | undefined> {
 }
 
 /**
- * Odoo exige el nombre de la base de datos. `db.list` suele estar deshabilitado
- * en Odoo Online, así que hay tres intentos: preguntarle al servidor, deducirlo
+ * Odoo exige el nombre de la base de datos en JSON-RPC. `db.list` suele estar
+ * deshabilitado, así que hay tres intentos: preguntarle al servidor, deducirlo
  * del subdominio, y por último preguntárselo al usuario.
  */
 async function resolveDatabase(
@@ -210,7 +315,7 @@ async function resolveDatabase(
     }
   } catch (error) {
     log.info(
-      `No se pudo listar las bases de datos (normal en Odoo Online): ${
+      `No se pudo listar las bases de datos (habitual cuando list_db está desactivado): ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { daysAgo } from '../util';
 import type { API, GitExtension } from '../vendor/git';
 import type { Commit, DayGroup } from './types';
 
@@ -17,10 +18,19 @@ const FIELD = '\x1f';
 const RECORD = '\x1e';
 const FORMAT = '--pretty=format:%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1e';
 
+/** Valor de `odooTimesheet.repositoryPath` que significa «todos». */
+export const ALL_REPOSITORIES = '*';
+
 export interface ReadCommitsOptions {
   days: number;
   authorEmail?: string;
   includeMerges: boolean;
+}
+
+export interface RepositorySelection {
+  repositories: string[];
+  /** Explicación cuando el ajuste apunta a algo que no sirve. */
+  problem?: string;
 }
 
 /** Respeta `git.path` de VS Code si el usuario lo configuró. */
@@ -52,7 +62,7 @@ async function gitApi(): Promise<API | undefined> {
 }
 
 /** Sube por el árbol de directorios buscando `.git` (directorio o archivo de worktree). */
-function findGitRoot(startPath: string): string | undefined {
+export function resolveGitRoot(startPath: string): string | undefined {
   let current = startPath;
   for (;;) {
     if (fs.existsSync(path.join(current, '.git'))) {
@@ -66,39 +76,70 @@ function findGitRoot(startPath: string): string | undefined {
   }
 }
 
+export function repositoryLabel(root: string): string {
+  return path.basename(root) || root;
+}
+
 /**
- * Localiza el repositorio a mostrar. Prefiere la API de `vscode.git` porque ya
- * resolvió submódulos y worktrees; si todavía no descubrió nada (es asíncrona),
- * cae a un escaneo directo de las carpetas del workspace.
+ * Todos los repositorios que se pueden ofrecer, con el del editor activo el
+ * primero: es el que el usuario está mirando, y por tanto el que el modo
+ * automático debe elegir.
  */
-export async function findRepository(): Promise<string | undefined> {
+export async function findRepositories(): Promise<string[]> {
   const api = await gitApi();
-  const roots = api?.repositories.map((repo) => repo.rootUri.fsPath) ?? [];
+  const roots = new Set<string>(api?.repositories.map((repo) => repo.rootUri.fsPath) ?? []);
 
-  if (roots.length > 0) {
-    // Si el editor activo pertenece a uno de los repos, ese es el relevante.
-    const activePath = vscode.window.activeTextEditor?.document.uri.fsPath;
-    if (activePath) {
-      const containing = roots
-        .filter((root) => activePath.toLowerCase().startsWith(root.toLowerCase()))
-        .sort((a, b) => b.length - a.length)[0];
-      if (containing) {
-        return containing;
-      }
-    }
-    return roots[0];
-  }
-
+  // La API de git descubre los repos de forma asíncrona: puede estar vacía
+  // todavía, así que se completa escaneando las carpetas del workspace.
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     if (folder.uri.scheme !== 'file') {
       continue;
     }
-    const root = findGitRoot(folder.uri.fsPath);
+    const root = resolveGitRoot(folder.uri.fsPath);
     if (root) {
-      return root;
+      roots.add(root);
     }
   }
-  return undefined;
+
+  const list = [...roots];
+  const activePath = vscode.window.activeTextEditor?.document.uri.fsPath;
+  if (activePath) {
+    const containing = list
+      .filter((root) => activePath.toLowerCase().startsWith(root.toLowerCase()))
+      .sort((a, b) => b.length - a.length)[0];
+    if (containing) {
+      return [containing, ...list.filter((root) => root !== containing)];
+    }
+  }
+  return list;
+}
+
+/**
+ * Aplica el ajuste `odooTimesheet.repositoryPath`. Pura a propósito: la
+ * comprobación del sistema de archivos entra como parámetro para poder probarla.
+ */
+export function pickRepositories(
+  setting: string,
+  discovered: string[],
+  exists: (candidate: string) => boolean = (candidate) => resolveGitRoot(candidate) !== undefined,
+): RepositorySelection {
+  const value = setting.trim();
+
+  if (value === ALL_REPOSITORIES) {
+    return { repositories: discovered };
+  }
+
+  if (value) {
+    if (!exists(value)) {
+      return {
+        repositories: [],
+        problem: `«${value}» ya no es un repositorio git. Ejecuta «Odoo: Elegir repositorio» para cambiarlo.`,
+      };
+    }
+    return { repositories: [value] };
+  }
+
+  return { repositories: discovered.slice(0, 1) };
 }
 
 /** Notifica cuando se abre o cierra un repositorio, para refrescar la vista. */
@@ -126,8 +167,24 @@ export async function getAuthorEmail(repoRoot: string): Promise<string | undefin
   }
 }
 
-export async function readCommits(repoRoot: string, options: ReadCommitsOptions): Promise<Commit[]> {
-  const args = ['log', `--since=${options.days} days ago`, '--date-order', FORMAT];
+/**
+ * Tope de commits que se leen antes de filtrar por fecha. Ver `readCommits`:
+ * no se puede usar `--since`, así que el recorte de fecha se hace aquí.
+ */
+const MAX_COMMITS = 5000;
+
+export async function readCommits(
+  repoRoot: string,
+  options: ReadCommitsOptions,
+): Promise<Commit[]> {
+  // Deliberadamente SIN `--since`. El walker de git poda la travesía en cuanto
+  // encuentra un commit más viejo que el corte, así que un HEAD con fecha
+  // antigua (rebase que conserva fechas, cherry-pick, `--date`, un reloj mal
+  // puesto) hace que `git log --since` devuelva CERO commits en silencio.
+  // Además `--since` mira la fecha de *commit* mientras que aquí se agrupa por
+  // la de *autor*: filtrar en JS por el mismo campo que se muestra evita esa
+  // segunda incoherencia.
+  const args = ['log', `-n${MAX_COMMITS}`, '--date-order', FORMAT];
   if (!options.includeMerges) {
     args.push('--no-merges');
   }
@@ -143,7 +200,8 @@ export async function readCommits(repoRoot: string, options: ReadCommitsOptions)
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
     });
-    return parseLog(stdout);
+    const cutoff = daysAgo(options.days);
+    return parseLog(stdout, repoRoot).filter((commit) => commit.day >= cutoff);
   } catch (error) {
     const message = errorText(error);
     // Repositorio recién inicializado, sin ningún commit todavía.
@@ -153,11 +211,11 @@ export async function readCommits(repoRoot: string, options: ReadCommitsOptions)
     if (/ENOENT/.test(message)) {
       throw new Error('No se encontró el ejecutable de git en el PATH.');
     }
-    throw new Error(`git log falló: ${message}`);
+    throw new Error(`git log falló en ${repositoryLabel(repoRoot)}: ${message}`);
   }
 }
 
-function parseLog(stdout: string): Commit[] {
+function parseLog(stdout: string, repoRoot: string): Commit[] {
   const commits: Commit[] = [];
   for (const raw of stdout.split(RECORD)) {
     // `--pretty=format:` une registros con un salto de línea que sobra tras el RS.
@@ -181,6 +239,7 @@ function parseLog(stdout: string): Commit[] {
       time: isoDate.slice(11, 16),
       subject: (fields[4] ?? '').trim(),
       body: (fields[5] ?? '').trim(),
+      repository: repoRoot,
     });
   }
   return commits;
@@ -198,7 +257,12 @@ export function groupByDay(commits: Commit[]): DayGroup[] {
   }
   return [...byDay.entries()]
     .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([day, list]) => ({ day, commits: list }));
+    .map(([day, list]) => ({
+      day,
+      // Al agregar varios repositorios el orden se mezcla: se reordena por
+      // instante real, no por texto, porque los offsets pueden diferir.
+      commits: list.sort((a, b) => Date.parse(b.isoDate) - Date.parse(a.isoDate)),
+    }));
 }
 
 function errorText(error: unknown): string {

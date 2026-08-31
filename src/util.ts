@@ -12,6 +12,11 @@ export function todayLocalDay(): string {
   return toLocalDay(new Date());
 }
 
+/** El día local de hace N días, `YYYY-MM-DD`. */
+export function daysAgo(days: number, today = new Date()): string {
+  return toLocalDay(new Date(today.getFullYear(), today.getMonth(), today.getDate() - days));
+}
+
 function shiftDay(day: string, delta: number): string {
   const [year, month, date] = day.split('-').map(Number);
   return toLocalDay(new Date(year, month - 1, date + delta));
@@ -61,6 +66,24 @@ export function formatHours(hours: number): string {
   // toFixed(2) garantiza que siempre haya punto decimal, así que quitar los
   // ceros de la derecha nunca puede comerse dígitos significativos.
   return `${hours.toFixed(2).replace(/\.?0+$/, '')} h`;
+}
+
+/**
+ * Prefijo de fecha para el nombre de una tarea nueva, siguiendo la convención
+ * que ya use el usuario en Odoo (`08/26 …`). Cadena vacía = sin prefijo.
+ */
+export function formatTaskDate(day: string, format: string): string {
+  const [year, month, date] = day.split('-');
+  switch (format) {
+    case 'MM/DD':
+      return `${month}/${date}`;
+    case 'DD/MM':
+      return `${date}/${month}`;
+    case 'YYYY-MM-DD':
+      return `${year}-${month}-${date}`;
+    default:
+      return '';
+  }
 }
 
 export function truncate(text: string, max: number): string {

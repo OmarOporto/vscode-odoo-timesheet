@@ -3,7 +3,7 @@
   "displayName": "Odoo Timesheet",
   "description": "Convierte tus commits diarios en líneas de horas en Odoo, sin salir de VS Code.",
   "version": "0.1.0",
-  "publisher": "peyosolutions",
+  "publisher": "BlueSentinel",
   "private": true,
   "license": "MIT",
   "engines": {
@@ -20,10 +20,10 @@
     "horas"
   ],
   "main": "./dist/extension.js",
-  "activationEvents": [
-    "onView:odooTimesheet.commits",
-    "onView:odooTimesheet.tasks"
+  "extensionKind": [
+    "workspace"
   ],
+  "activationEvents": [],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -49,7 +49,7 @@
     "viewsWelcome": [
       {
         "view": "odooTimesheet.commits",
-        "contents": "No se encontró un repositorio git en este workspace.\nAbre una carpeta con un repositorio para ver tus commits agrupados por día.",
+        "contents": "No se encontró un repositorio git en este workspace.\nPuedes apuntar la extensión a cualquier carpeta del disco.\n[Elegir repositorio](command:odooTimesheet.selectRepository)",
         "when": "!odooTimesheet.hasRepo"
       },
       {
@@ -72,9 +72,50 @@
         "icon": "$(debug-disconnect)"
       },
       {
+        "command": "odooTimesheet.changePassword",
+        "title": "Cambiar contraseña o API key",
+        "category": "Odoo",
+        "icon": "$(key)"
+      },
+      {
         "command": "odooTimesheet.testConnection",
         "title": "Probar conexión",
         "category": "Odoo"
+      },
+      {
+        "command": "odooTimesheet.diagnoseTasks",
+        "title": "Diagnosticar tareas que faltan",
+        "category": "Odoo",
+        "icon": "$(search-fuzzy)"
+      },
+      {
+        "command": "odooTimesheet.openSettings",
+        "title": "Abrir ajustes",
+        "category": "Odoo",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "odooTimesheet.openSettingsJson",
+        "title": "Editar settings.json",
+        "category": "Odoo"
+      },
+      {
+        "command": "odooTimesheet.selectProject",
+        "title": "Elegir proyecto",
+        "category": "Odoo",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "odooTimesheet.pinProject",
+        "title": "Fijar este proyecto",
+        "category": "Odoo",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "odooTimesheet.unpinProject",
+        "title": "Quitar el proyecto fijado",
+        "category": "Odoo",
+        "icon": "$(pinned-dirty)"
       },
       {
         "command": "odooTimesheet.refreshCommits",
@@ -101,13 +142,24 @@
         "icon": "$(calendar)"
       },
       {
+        "command": "odooTimesheet.selectRepository",
+        "title": "Elegir repositorio",
+        "category": "Odoo",
+        "icon": "$(repo)"
+      },
+      {
+        "command": "odooTimesheet.showMoreTasks",
+        "title": "Mostrar más tareas",
+        "category": "Odoo"
+      },
+      {
         "command": "odooTimesheet.logTime",
         "title": "Registrar horas…",
         "category": "Odoo",
         "icon": "$(add)"
       },
       {
-        "command": "odooTimesheet.openTaskInBrowser",
+        "command": "odooTimesheet.openInBrowser",
         "title": "Abrir en Odoo",
         "category": "Odoo",
         "icon": "$(link-external)"
@@ -126,44 +178,79 @@
     "menus": {
       "view/title": [
         {
-          "command": "odooTimesheet.setDateRange",
+          "command": "odooTimesheet.selectRepository",
           "when": "view == odooTimesheet.commits",
           "group": "navigation@1"
+        },
+        {
+          "command": "odooTimesheet.setDateRange",
+          "when": "view == odooTimesheet.commits",
+          "group": "navigation@2"
         },
         {
           "command": "odooTimesheet.refreshCommits",
           "when": "view == odooTimesheet.commits",
-          "group": "navigation@2"
+          "group": "navigation@3"
+        },
+        {
+          "command": "odooTimesheet.selectProject",
+          "when": "view == odooTimesheet.tasks && odooTimesheet.connected",
+          "group": "navigation@1"
         },
         {
           "command": "odooTimesheet.searchTasks",
           "when": "view == odooTimesheet.tasks",
-          "group": "navigation@1"
+          "group": "navigation@2"
         },
         {
           "command": "odooTimesheet.refreshTasks",
           "when": "view == odooTimesheet.tasks",
-          "group": "navigation@2"
+          "group": "navigation@3"
+        },
+        {
+          "command": "odooTimesheet.unpinProject",
+          "when": "view == odooTimesheet.tasks && odooTimesheet.projectPinned",
+          "group": "1_project@1"
         },
         {
           "command": "odooTimesheet.connect",
           "when": "view == odooTimesheet.tasks && !odooTimesheet.connected",
-          "group": "1_odoo@1"
+          "group": "2_odoo@1"
         },
         {
           "command": "odooTimesheet.disconnect",
           "when": "view == odooTimesheet.tasks && odooTimesheet.connected",
-          "group": "1_odoo@1"
+          "group": "2_odoo@1"
+        },
+        {
+          "command": "odooTimesheet.changePassword",
+          "when": "view == odooTimesheet.tasks",
+          "group": "2_odoo@2"
         },
         {
           "command": "odooTimesheet.testConnection",
           "when": "view == odooTimesheet.tasks",
-          "group": "1_odoo@2"
+          "group": "2_odoo@3"
+        },
+        {
+          "command": "odooTimesheet.diagnoseTasks",
+          "when": "view == odooTimesheet.tasks && odooTimesheet.connected",
+          "group": "2_odoo@4"
+        },
+        {
+          "command": "odooTimesheet.openSettings",
+          "when": "view == odooTimesheet.tasks",
+          "group": "9_odoo@1"
+        },
+        {
+          "command": "odooTimesheet.openSettingsJson",
+          "when": "view == odooTimesheet.tasks",
+          "group": "9_odoo@2"
         },
         {
           "command": "odooTimesheet.showLog",
           "when": "view == odooTimesheet.tasks",
-          "group": "9_odoo@1"
+          "group": "9_odoo@3"
         }
       ],
       "view/item/context": [
@@ -174,12 +261,17 @@
         },
         {
           "command": "odooTimesheet.logTime",
-          "when": "view == odooTimesheet.tasks && viewItem == task",
+          "when": "view == odooTimesheet.tasks && viewItem =~ /^(task|project)$/",
           "group": "inline@1"
         },
         {
-          "command": "odooTimesheet.openTaskInBrowser",
-          "when": "view == odooTimesheet.tasks && viewItem == task",
+          "command": "odooTimesheet.pinProject",
+          "when": "view == odooTimesheet.tasks && viewItem == project",
+          "group": "inline@2"
+        },
+        {
+          "command": "odooTimesheet.openInBrowser",
+          "when": "view == odooTimesheet.tasks && viewItem =~ /^(task|project)$/",
           "group": "1_odoo@1"
         },
         {
@@ -190,11 +282,19 @@
       ],
       "commandPalette": [
         {
+          "command": "odooTimesheet.showMoreTasks",
+          "when": "false"
+        },
+        {
           "command": "odooTimesheet.copyCommitHash",
           "when": "false"
         },
         {
-          "command": "odooTimesheet.openTaskInBrowser",
+          "command": "odooTimesheet.openInBrowser",
+          "when": "false"
+        },
+        {
+          "command": "odooTimesheet.pinProject",
           "when": "false"
         }
       ]
@@ -215,7 +315,37 @@
         "odooTimesheet.username": {
           "type": "string",
           "default": "",
-          "description": "Tu login de Odoo, normalmente tu correo electrónico."
+          "description": "Tu login de Odoo, normalmente tu correo electrónico. Con la API JSON-2 se rellena solo."
+        },
+        "odooTimesheet.api": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "json2",
+            "jsonrpc"
+          ],
+          "enumDescriptions": [
+            "Usa JSON-2 si la instancia lo soporta (Odoo 19+) y cae a JSON-RPC si no.",
+            "Fuerza la API JSON-2. Requiere Odoo 19 o superior y una API key.",
+            "Fuerza la API JSON-RPC clásica. Requiere base de datos y usuario."
+          ],
+          "default": "auto",
+          "markdownDescription": "Qué API de Odoo usar. `/jsonrpc` está deprecado y Odoo lo eliminará en la versión 22 (otoño de 2028)."
+        },
+        "odooTimesheet.projectId": {
+          "type": "number",
+          "default": 0,
+          "description": "Id del proyecto fijado en el panel. 0 = ninguno, se muestran todos los proyectos."
+        },
+        "odooTimesheet.projectName": {
+          "type": "string",
+          "default": "",
+          "description": "Nombre del proyecto fijado. Solo informativo, para que este archivo se lea bien."
+        },
+        "odooTimesheet.repositoryPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Repositorio del panel de commits. Vacío = automático (el del editor activo). `*` = todos los del workspace, agregados por día. También admite una ruta absoluta a cualquier carpeta del disco. Usa «Odoo: Elegir repositorio» para no escribirlo a mano."
         },
         "odooTimesheet.daysBack": {
           "type": "number",
@@ -237,22 +367,77 @@
         "odooTimesheet.taskScope": {
           "type": "string",
           "enum": [
+            "mine",
             "assigned",
+            "timesheet",
             "all"
           ],
           "enumDescriptions": [
-            "Solo las tareas donde estás asignado.",
+            "Tareas asignadas a ti O en las que ya has registrado horas.",
+            "Solo las tareas donde figuras en Asignados. Registrar horas NO te asigna a una tarea.",
+            "Solo las tareas en las que has registrado horas.",
             "Todas las tareas que puedes ver en Odoo."
           ],
-          "default": "assigned",
-          "description": "Qué tareas listar en el panel de Odoo."
+          "default": "mine",
+          "markdownDescription": "Qué tareas listar en el panel. `assigned` filtra por el campo **Asignados** (`user_ids`), que no cambia al imputar horas: si tus tareas no aparecen, ejecuta «Odoo: Diagnosticar tareas que faltan»."
+        },
+        "odooTimesheet.taskOrder": {
+          "type": "string",
+          "enum": [
+            "created",
+            "updated",
+            "name"
+          ],
+          "enumDescriptions": [
+            "Las creadas más recientemente primero.",
+            "Las modificadas más recientemente primero.",
+            "Por nombre, alfabéticamente."
+          ],
+          "default": "created",
+          "markdownDescription": "Orden de las tareas. `created` evita que tocar una tarea vieja la suba al principio, que es lo que pasa con `updated`."
+        },
+        "odooTimesheet.tasksPerProject": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 200,
+          "description": "Cuántas tareas mostrar por proyecto en el panel antes del nodo «Mostrar más»."
         },
         "odooTimesheet.taskLimit": {
           "type": "number",
           "default": 50,
           "minimum": 5,
           "maximum": 500,
-          "description": "Número máximo de tareas a cargar por consulta."
+          "description": "Número máximo de tareas a traer en las BÚSQUEDAS (el filtro de texto y el selector del flujo de registro)."
+        },
+        "odooTimesheet.taskNameDateFormat": {
+          "type": "string",
+          "enum": [
+            "MM/DD",
+            "DD/MM",
+            "YYYY-MM-DD",
+            ""
+          ],
+          "enumDescriptions": [
+            "08/26 Mensajes de commit",
+            "26/08 Mensajes de commit",
+            "2026-08-26 Mensajes de commit",
+            "Sin prefijo de fecha"
+          ],
+          "default": "MM/DD",
+          "description": "Prefijo de fecha al proponer el nombre de una tarea nueva."
+        },
+        "odooTimesheet.assignNewTasksToMe": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Asignarte las tareas que crees desde la extensión. Recomendado: una tarea sin asignados no aparece con `taskScope: assigned`."
+        },
+        "odooTimesheet.diagnosticsDays": {
+          "type": "number",
+          "default": 60,
+          "minimum": 1,
+          "maximum": 365,
+          "description": "Días de imputaciones que revisa el comando de diagnóstico."
         },
         "odooTimesheet.allowInsecureTLS": {
           "type": "boolean",
@@ -269,7 +454,8 @@
     "test": "node test/git.test.mjs && node test/odoo.test.mjs",
     "check": "npm run typecheck && npm run build && npm test",
     "vscode:prepublish": "npm run build",
-    "package": "npx --yes @vscode/vsce package --allow-missing-repository --skip-license"
+    "package": "npx --yes @vscode/vsce package --allow-missing-repository --skip-license",
+    "install-local": "node scripts/install-local.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

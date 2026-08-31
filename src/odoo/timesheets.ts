@@ -16,12 +16,7 @@ export interface TimesheetLineInput {
  * claro. Lo resolvemos antes para dar un mensaje accionable.
  */
 export async function resolveEmployeeId(client: OdooClient): Promise<number> {
-  const uid = client.userId;
-  if (uid === undefined) {
-    throw new OdooError('No hay una sesión activa de Odoo.', 'auth');
-  }
-
-  const domain = [['user_id', '=', uid]];
+  const domain = [['user_id', '=', client.userId]];
 
   try {
     const employees = await client.searchRead<{ id: number }>('hr.employee', domain, ['name'], {

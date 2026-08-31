@@ -16,6 +16,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT = path.resolve(HERE, '..');
 const TMP = path.join(HERE, '.tmp');
 const REPO = path.join(TMP, 'fixture-repo');
+const REPO_B = path.join(TMP, 'fixture-repo-b');
 
 fs.rmSync(TMP, { recursive: true, force: true });
 fs.mkdirSync(TMP, { recursive: true });
@@ -59,16 +60,21 @@ const require = createRequire(import.meta.url);
 const git = require(path.join(TMP, 'gitService.cjs'));
 const util = require(path.join(TMP, 'util.cjs'));
 
-// --- Repositorio de prueba --------------------------------------------------
-fs.mkdirSync(REPO, { recursive: true });
-const run = (args, env = {}) =>
-  execFileSync('git', args, { cwd: REPO, env: { ...process.env, ...env }, encoding: 'utf8' });
+// --- Repositorios de prueba -------------------------------------------------
+const initRepo = (root) => {
+  fs.mkdirSync(root, { recursive: true });
+  const at = (args, env = {}) =>
+    execFileSync('git', args, { cwd: root, env: { ...process.env, ...env }, encoding: 'utf8' });
+  at(['init', '-q', '-b', 'main']);
+  // Correo con `+`: sin --fixed-strings git lo leería como cuantificador regex.
+  at(['config', 'user.email', 'dev+test@example.com']);
+  at(['config', 'user.name', 'Dev Test']);
+  at(['config', 'commit.gpgsign', 'false']);
+  return at;
+};
 
-run(['init', '-q', '-b', 'main']);
-// Correo con `+`: sin --fixed-strings git lo interpretaría como cuantificador regex.
-run(['config', 'user.email', 'dev+test@example.com']);
-run(['config', 'user.name', 'Dev Test']);
-run(['config', 'commit.gpgsign', 'false']);
+const run = initRepo(REPO);
+const runB = initRepo(REPO_B);
 
 const pad = (n) => String(n).padStart(2, '0');
 const day = (offset) => {
@@ -79,16 +85,19 @@ const day = (offset) => {
 const today = day(0);
 const yesterday = day(1);
 
-const commit = (file, message, authorDate, email = 'dev+test@example.com') => {
-  fs.writeFileSync(path.join(REPO, file), `${message}\n`);
-  run(['add', '-A']);
-  run(['commit', '-q', '-m', message], {
+const commitIn = (root, at) => (file, message, authorDate, email = 'dev+test@example.com') => {
+  fs.writeFileSync(path.join(root, file), `${message}\n`);
+  at(['add', '-A']);
+  at(['commit', '-q', '-m', message], {
     GIT_AUTHOR_DATE: authorDate,
     GIT_COMMITTER_DATE: authorDate,
     GIT_AUTHOR_EMAIL: email,
     GIT_COMMITTER_EMAIL: email,
   });
 };
+
+const commit = commitIn(REPO, run);
+const commitB = commitIn(REPO_B, runB);
 
 commit('a.txt', 'fix: corrige el redirect de login', `${yesterday}T09:15:00-06:00`);
 commit(
@@ -133,11 +142,19 @@ assert.equal(groups[1].commits.length, 2);
 const all = await git.readCommits(REPO, { days: 14, includeMerges: false });
 assert.equal(all.length, 4, 'sin filtro de autor deben verse todos');
 
+// Este commit queda como HEAD con fecha de hace 40 días. Es el caso que rompía
+// `git log --since`: el walker poda la travesía al primer commit más viejo que
+// el corte y devuelve CERO commits, escondiendo todo el historial reciente.
 commit('e.txt', 'old: fuera de rango', `${day(40)}T10:00:00-06:00`);
 const recent = await git.readCommits(REPO, { days: 14, includeMerges: false });
+assert.equal(
+  recent.length,
+  4,
+  'un HEAD con fecha antigua no puede ocultar el historial reciente',
+);
 assert.ok(
   !recent.some((c) => c.subject.startsWith('old:')),
-  '--since no filtró un commit de hace 40 días',
+  'y el commit de hace 40 días sí queda fuera del rango',
 );
 
 const emptyRepo = path.join(TMP, 'empty-repo');
@@ -147,6 +164,84 @@ assert.deepEqual(
   await git.readCommits(emptyRepo, { days: 14, includeMerges: false }),
   [],
   'un repositorio sin commits debe devolver lista vacía, no lanzar',
+);
+
+// --- Varios repositorios agregados ------------------------------------------
+commitB('b1.txt', 'chore: setup del segundo repo', `${yesterday}T11:00:00-06:00`);
+commitB('b2.txt', 'feat: algo en el otro repo', `${today}T08:30:00-06:00`);
+
+const fromA = await git.readCommits(REPO, { days: 14, authorEmail: 'dev+test@example.com', includeMerges: false });
+const fromB = await git.readCommits(REPO_B, { days: 14, authorEmail: 'dev+test@example.com', includeMerges: false });
+
+assert.ok(
+  fromA.every((c) => c.repository === REPO),
+  'cada commit debe llevar la raíz de su repositorio',
+);
+assert.ok(fromB.every((c) => c.repository === REPO_B));
+
+const aggregated = git.groupByDay([...fromA, ...fromB]);
+assert.equal(aggregated[0].day, today);
+assert.deepEqual(
+  aggregated[0].commits.map((c) => c.time),
+  ['23:30', '08:30'],
+  'dentro del día los commits de ambos repos se ordenan por hora descendente',
+);
+assert.deepEqual(
+  aggregated[1].commits.map((c) => c.time),
+  ['14:40', '11:00', '09:15'],
+  'la mezcla de repositorios respeta el orden cronológico',
+);
+assert.equal(
+  new Set(aggregated[1].commits.map((c) => c.repository)).size,
+  2,
+  'ese día combina commits de los dos repositorios',
+);
+
+// --- pickRepositories (pura) ------------------------------------------------
+const discovered = [REPO, REPO_B];
+const exists = (candidate) => candidate === REPO || candidate === REPO_B;
+
+assert.deepEqual(
+  git.pickRepositories('', discovered, exists).repositories,
+  [REPO],
+  'automático: solo el primero, que es el del editor activo',
+);
+assert.deepEqual(
+  git.pickRepositories('*', discovered, exists).repositories,
+  discovered,
+  '"*" agrega todos',
+);
+assert.deepEqual(
+  git.pickRepositories(REPO_B, discovered, exists).repositories,
+  [REPO_B],
+  'una ruta concreta manda sobre lo descubierto',
+);
+assert.deepEqual(
+  git.pickRepositories('  ', discovered, exists).repositories,
+  [REPO],
+  'los espacios sueltos cuentan como vacío',
+);
+
+const stale = git.pickRepositories('C:\\ya\\no\\existe', discovered, exists);
+assert.deepEqual(stale.repositories, [], 'una ruta que ya no es un repo no devuelve nada');
+assert.match(
+  stale.problem,
+  /Elegir repositorio/,
+  'y explica cómo arreglarlo en vez de fallar en silencio',
+);
+
+assert.equal(git.repositoryLabel(REPO_B), 'fixture-repo-b');
+assert.equal(git.resolveGitRoot(REPO), REPO, 'la raíz se resuelve a sí misma');
+assert.equal(
+  git.resolveGitRoot(path.join(REPO, 'a.txt')),
+  REPO,
+  'elegir un archivo o subcarpeta sube hasta la raíz: es lo que necesita «Examinar…»',
+);
+assert.equal(
+  // La raíz del disco: nunca está dentro de un repositorio.
+  git.resolveGitRoot(path.parse(TMP).root),
+  undefined,
+  'una carpeta fuera de todo repositorio no resuelve, y la búsqueda termina',
 );
 
 // --- Utilidades puras -------------------------------------------------------

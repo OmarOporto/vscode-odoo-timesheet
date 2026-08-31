@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
 import {
-  findRepository,
+  findRepositories,
   getAuthorEmail,
   groupByDay,
+  pickRepositories,
   readCommits,
+  repositoryLabel,
   watchRepositories,
 } from '../git/gitService';
 import type { Commit } from '../git/types';
@@ -20,6 +22,8 @@ export class CommitNode {
   constructor(
     readonly commit: Commit,
     readonly day: string,
+    /** Con varios repositorios activos hay que decir de cuál viene cada commit. */
+    readonly showRepository = false,
   ) {}
 }
 
@@ -41,7 +45,7 @@ export class CommitsTreeProvider
   private readonly disposables: vscode.Disposable[] = [];
   private repoWatchers: vscode.Disposable[] = [];
 
-  private repoRoot: string | undefined;
+  private repositories: string[] = [];
   private days: DayNode[] = [];
   private loaded = false;
   private loadError: string | undefined;
@@ -53,7 +57,8 @@ export class CommitsTreeProvider
         if (
           event.affectsConfiguration('odooTimesheet.daysBack') ||
           event.affectsConfiguration('odooTimesheet.onlyMyCommits') ||
-          event.affectsConfiguration('odooTimesheet.includeMerges')
+          event.affectsConfiguration('odooTimesheet.includeMerges') ||
+          event.affectsConfiguration('odooTimesheet.repositoryPath')
         ) {
           this.refresh();
         }
@@ -75,8 +80,15 @@ export class CommitsTreeProvider
     return this.days.flatMap((day) => day.commits);
   }
 
-  get currentRepository(): string | undefined {
-    return this.repoRoot;
+  /** Para la cabecera de la vista. */
+  async describeRepositories(): Promise<string | undefined> {
+    await this.ensureLoaded();
+    if (this.repositories.length === 0) {
+      return undefined;
+    }
+    return this.repositories.length === 1
+      ? repositoryLabel(this.repositories[0])
+      : `${this.repositories.length} repositorios`;
   }
 
   getTreeItem(element: CommitTreeNode): vscode.TreeItem {
@@ -103,7 +115,9 @@ export class CommitsTreeProvider
         vscode.TreeItemCollapsibleState.None,
       );
       item.id = `commit:${commit.hash}`;
-      item.description = `${commit.time} · ${commit.shortHash}`;
+      item.description = element.showRepository
+        ? `${commit.time} · ${repositoryLabel(commit.repository)}`
+        : `${commit.time} · ${commit.shortHash}`;
       item.contextValue = 'commit';
       item.iconPath = new vscode.ThemeIcon('git-commit');
 
@@ -114,6 +128,7 @@ export class CommitsTreeProvider
         tooltip.appendText(`\n\n${commit.body}`);
       }
       tooltip.appendText(`\n\n${commit.authorName} · ${commit.day} ${commit.time} · ${commit.shortHash}`);
+      tooltip.appendText(`\n${repositoryLabel(commit.repository)}`);
       item.tooltip = tooltip;
       return item;
     }
@@ -126,7 +141,8 @@ export class CommitsTreeProvider
 
   async getChildren(element?: CommitTreeNode): Promise<CommitTreeNode[]> {
     if (element instanceof DayNode) {
-      return element.commits.map((commit) => new CommitNode(commit, element.day));
+      const showRepository = this.repositories.length > 1;
+      return element.commits.map((commit) => new CommitNode(commit, element.day, showRepository));
     }
     if (element) {
       return [];
@@ -137,7 +153,7 @@ export class CommitsTreeProvider
     if (this.loadError) {
       return [new InfoNode(this.loadError, 'error')];
     }
-    if (!this.repoRoot) {
+    if (this.repositories.length === 0) {
       // La vista de bienvenida (viewsWelcome) cubre este caso.
       return [];
     }
@@ -156,28 +172,49 @@ export class CommitsTreeProvider
     this.loadError = undefined;
 
     try {
-      const root = await findRepository();
-      this.setRepository(root);
-      await vscode.commands.executeCommand('setContext', 'odooTimesheet.hasRepo', Boolean(root));
-      if (!root) {
+      const config = vscode.workspace.getConfiguration('odooTimesheet');
+      const discovered = await findRepositories();
+      const selection = pickRepositories(config.get<string>('repositoryPath', ''), discovered);
+
+      this.setRepositories(selection.repositories);
+      await vscode.commands.executeCommand(
+        'setContext',
+        'odooTimesheet.hasRepo',
+        selection.repositories.length > 0,
+      );
+
+      if (selection.problem) {
+        this.loadError = selection.problem;
+        this.days = [];
+        return;
+      }
+      if (selection.repositories.length === 0) {
         this.days = [];
         return;
       }
 
-      const config = vscode.workspace.getConfiguration('odooTimesheet');
       const onlyMine = config.get<boolean>('onlyMyCommits', true);
-      const authorEmail = onlyMine ? await getAuthorEmail(root) : undefined;
-      if (onlyMine && !authorEmail) {
-        this.log.warn('git config user.email no está definido: se mostrarán los commits de todos los autores.');
-      }
+      const days = config.get<number>('daysBack', 14);
+      const includeMerges = config.get<boolean>('includeMerges', false);
 
-      const commits = await readCommits(root, {
-        days: config.get<number>('daysBack', 14),
-        authorEmail,
-        includeMerges: config.get<boolean>('includeMerges', false),
-      });
+      // Un `git log` por repositorio, en paralelo: son procesos cortos.
+      const perRepository = await Promise.all(
+        selection.repositories.map(async (root) => {
+          const authorEmail = onlyMine ? await getAuthorEmail(root) : undefined;
+          if (onlyMine && !authorEmail) {
+            this.log.warn(
+              `${repositoryLabel(root)}: git config user.email no está definido, se mostrarán los commits de todos los autores.`,
+            );
+          }
+          return readCommits(root, { days, authorEmail, includeMerges });
+        }),
+      );
+
+      const commits = perRepository.flat();
       this.days = groupByDay(commits).map((group) => new DayNode(group.day, group.commits));
-      this.log.debug(`${commits.length} commits leídos de ${root}`);
+      this.log.debug(
+        `${commits.length} commits leídos de ${selection.repositories.length} repositorio(s)`,
+      );
     } catch (error) {
       this.loadError = error instanceof Error ? error.message : String(error);
       this.log.error(this.loadError);
@@ -186,27 +223,30 @@ export class CommitsTreeProvider
   }
 
   /** Vigila `.git/logs/HEAD` para que un commit nuevo aparezca sin refrescar a mano. */
-  private setRepository(root: string | undefined): void {
-    if (root === this.repoRoot) {
-      return;
-    }
-    this.repoRoot = root;
-    vscode.Disposable.from(...this.repoWatchers).dispose();
-    this.repoWatchers = [];
-    if (!root) {
+  private setRepositories(roots: string[]): void {
+    const unchanged =
+      roots.length === this.repositories.length &&
+      roots.every((root, index) => root === this.repositories[index]);
+    if (unchanged) {
       return;
     }
 
-    const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(root), '.git/logs/HEAD'),
-    );
-    const onChange = () => this.refresh();
-    this.repoWatchers.push(
-      watcher,
-      watcher.onDidChange(onChange),
-      watcher.onDidCreate(onChange),
-      watcher.onDidDelete(onChange),
-    );
+    this.repositories = roots;
+    vscode.Disposable.from(...this.repoWatchers).dispose();
+    this.repoWatchers = [];
+
+    for (const root of roots) {
+      const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(vscode.Uri.file(root), '.git/logs/HEAD'),
+      );
+      const onChange = () => this.refresh();
+      this.repoWatchers.push(
+        watcher,
+        watcher.onDidChange(onChange),
+        watcher.onDidCreate(onChange),
+        watcher.onDidDelete(onChange),
+      );
+    }
   }
 
   dispose(): void {

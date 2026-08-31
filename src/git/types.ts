@@ -11,6 +11,8 @@ export interface Commit {
   time: string;
   subject: string;
   body: string;
+  /** Raíz del repositorio del que salió, para poder agregar varios. */
+  repository: string;
 }
 
 export interface DayGroup {

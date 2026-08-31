@@ -1,24 +1,56 @@
 import * as vscode from 'vscode';
-import { OdooClient, OdooError, type OdooCredentials } from './odoo/client';
+import { OdooClient, OdooError, type ApiPreference, type OdooCredentials } from './odoo/client';
 import { detectSchema, type OdooSchema } from './odoo/schema';
 import { resolveEmployeeId } from './odoo/timesheets';
 
 const SECRET_KEY = 'odooTimesheet.password';
+const GLOBAL = vscode.ConfigurationTarget.Global;
 
 export interface OdooConnection {
   client: OdooClient;
   schema: OdooSchema;
 }
 
+export interface OdooSettings extends Omit<OdooCredentials, 'password'> {
+  api: ApiPreference;
+}
+
 /** Lee la parte no secreta de la configuración. La contraseña vive en SecretStorage. */
-export function readSettings(): Omit<OdooCredentials, 'password'> {
+export function readSettings(): OdooSettings {
   const config = vscode.workspace.getConfiguration('odooTimesheet');
   return {
     url: (config.get<string>('url') ?? '').trim(),
     db: (config.get<string>('db') ?? '').trim(),
     username: (config.get<string>('username') ?? '').trim(),
     allowInsecureTLS: config.get<boolean>('allowInsecureTLS', false),
+    api: config.get<ApiPreference>('api', 'auto'),
   };
+}
+
+export interface PinnedProject {
+  id: number;
+  name: string;
+}
+
+/** El proyecto fijado vive en `settings.json` para que se pueda editar a mano. */
+export function readPinnedProject(): PinnedProject | undefined {
+  const config = vscode.workspace.getConfiguration('odooTimesheet');
+  const id = config.get<number>('projectId', 0);
+  if (!id || id <= 0) {
+    return undefined;
+  }
+  return { id, name: (config.get<string>('projectName') ?? '').trim() || `#${id}` };
+}
+
+export async function writePinnedProject(project: PinnedProject | undefined): Promise<void> {
+  const config = vscode.workspace.getConfiguration('odooTimesheet');
+  await config.update('projectId', project?.id ?? 0, GLOBAL);
+  await config.update('projectName', project?.name ?? '', GLOBAL);
+  await vscode.commands.executeCommand(
+    'setContext',
+    'odooTimesheet.projectPinned',
+    project !== undefined,
+  );
 }
 
 export class OdooSession implements vscode.Disposable {
@@ -60,9 +92,8 @@ export class OdooSession implements vscode.Disposable {
     return this.context.secrets.delete(SECRET_KEY);
   }
 
-  async connect(credentials: OdooCredentials): Promise<OdooConnection> {
-    const client = new OdooClient(credentials, (message) => this.log.debug(message));
-    await client.authenticate();
+  async connect(credentials: OdooCredentials, api: ApiPreference): Promise<OdooConnection> {
+    const client = await OdooClient.connect(credentials, api, (message) => this.log.debug(message));
     const schema = await detectSchema(client, (message) => this.log.warn(message));
 
     this.current = { client, schema };
@@ -71,8 +102,9 @@ export class OdooSession implements vscode.Disposable {
     this.emitter.fire();
 
     this.log.info(
-      `Conectado a ${client.url} · db «${client.db}» · usuario ${client.login} (uid ${client.userId}) · ` +
-        `Odoo ${schema.serverVersion} · campo de asignado «${schema.assigneeField}»`,
+      `Conectado a ${client.url} · transporte ${client.api} · db «${client.db ?? '(no aplica)'}» · ` +
+        `usuario ${client.login} (uid ${client.userId}) · Odoo ${schema.serverVersion} · ` +
+        `campo de asignado «${schema.assigneeField}»`,
     );
     return this.current;
   }
@@ -88,7 +120,13 @@ export class OdooSession implements vscode.Disposable {
   /** Reconecta al arrancar si ya hay credenciales guardadas. Falla en silencio. */
   async restore(): Promise<void> {
     const settings = readSettings();
-    if (!settings.url || !settings.db || !settings.username) {
+    await vscode.commands.executeCommand(
+      'setContext',
+      'odooTimesheet.projectPinned',
+      readPinnedProject() !== undefined,
+    );
+
+    if (!settings.url) {
       return;
     }
     const password = await this.readPassword();
@@ -96,7 +134,7 @@ export class OdooSession implements vscode.Disposable {
       return;
     }
     try {
-      await this.connect({ ...settings, password });
+      await this.connect({ ...settings, password }, settings.api);
     } catch (error) {
       this.log.warn(
         `No se pudo restaurar la sesión de Odoo: ${error instanceof Error ? error.message : String(error)}`,

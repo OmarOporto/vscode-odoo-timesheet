@@ -86,6 +86,22 @@ export function formatTaskDate(day: string, format: string): string {
   }
 }
 
+/**
+ * Texto completo de un commit para la descripción de la hoja de horas: el
+ * subject más el cuerpo, si lo tiene, colapsado a una sola línea.
+ *
+ * El campo `name` de account.analytic.line es un Char sin `size=`, así que Odoo
+ * no impone límite; el recorte es decisión nuestra y se aplica al final.
+ */
+export function joinCommitText(subject: string, body: string): string {
+  const head = subject.trim();
+  const tail = body.replace(/\s+/g, ' ').trim();
+  if (!tail) {
+    return head;
+  }
+  return head ? `${head} — ${tail}` : tail;
+}
+
 export function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }

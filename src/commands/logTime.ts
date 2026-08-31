@@ -17,6 +17,7 @@ import {
   formatDayLabel,
   formatHours,
   formatTaskDate,
+  joinCommitText,
   parseHours,
   pluralize,
   todayLocalDay,
@@ -34,6 +35,13 @@ export interface LogTimeDeps {
 }
 
 type LineMode = 'grouped' | 'per-commit';
+
+/**
+ * Tope de la descripción sugerida. Odoo no impone ninguno, pero la rejilla de
+ * hojas de horas muestra la descripción en una celda de una línea. Es solo el
+ * valor precargado: si escribes más en el InputBox, se guarda entero.
+ */
+const MAX_DESCRIPTION = 1000;
 
 export async function logTimeCommand(deps: LogTimeDeps, node?: unknown): Promise<void> {
   try {
@@ -445,7 +453,9 @@ async function buildGroupedLines(
   // Si la selección abarca varios días se crea una línea por día: imputar el
   // trabajo del lunes con fecha de hoy falsearía la hoja de horas.
   for (const group of groupByDay(commits)) {
-    const subjects = group.commits.map((commit) => commit.subject).filter(Boolean);
+    const texts = group.commits
+      .map((commit) => joinCommitText(commit.subject, commit.body))
+      .filter(Boolean);
 
     const hours = await askHours(
       `${formatDayLabel(group.day)} (${group.day}) · ${pluralize(group.commits.length, 'commit', 'commits')}`,
@@ -454,7 +464,7 @@ async function buildGroupedLines(
       return undefined;
     }
 
-    const description = await askDescription(truncate(subjects.join('; '), 240));
+    const description = await askDescription(truncate(texts.join('; '), MAX_DESCRIPTION));
     if (description === undefined) {
       return undefined;
     }
@@ -479,7 +489,8 @@ async function buildPerCommitLines(
     }
     lines.push({
       date: commit.day,
-      description: commit.subject || commit.shortHash,
+      description:
+        truncate(joinCommitText(commit.subject, commit.body), MAX_DESCRIPTION) || commit.shortHash,
       hours,
       taskId,
       projectId,

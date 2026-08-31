@@ -47,12 +47,23 @@ jobs:
 
       # Se usa el `gh` que ya viene en el runner en vez de una acción de
       # terceros: una dependencia menos en la que confiar para publicar.
+      #
+      # Se adjuntan DOS copias del mismo paquete:
+      #   odoo-timesheet-<version>.vsix  → identifica la versión en la página
+      #   odoo-timesheet.vsix            → nombre fijo, que es lo que hace que
+      #                                    /releases/latest/download/… sea una
+      #                                    URL permanente para actualizar.
       - name: Crear el release y adjuntar el .vsix
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          VSIX="${NAME}-${VERSION}.vsix"
+          cp "$VSIX" "${NAME}.vsix"
+
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" ./*.vsix --clobber
+            gh release upload "$GITHUB_REF_NAME" "$VSIX" "${NAME}.vsix" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" ./*.vsix --generate-notes
+            gh release create "$GITHUB_REF_NAME" "$VSIX" "${NAME}.vsix" --generate-notes
           fi

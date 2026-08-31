@@ -15,15 +15,19 @@ Un panel en la barra lateral con dos vistas: **tus commits agrupados por día** 
 
 ### Desde un release (lo más rápido)
 
-Descarga el `.vsix` de la [última release](https://github.com/OmarOporto/vscode-odoo-timesheet/releases) y:
+Este comando instala **y actualiza** a la última versión. La URL es permanente:
 
 ```bash
-code --install-extension odoo-timesheet-<version>.vsix
+curl -L -o /tmp/ots.vsix https://github.com/OmarOporto/vscode-odoo-timesheet/releases/latest/download/odoo-timesheet.vsix \
+  && code --install-extension /tmp/ots.vsix --force \
+  && rm /tmp/ots.vsix
 ```
 
-O en VS Code: `Ctrl+Shift+P` → **«Extensions: Install from VSIX…»**.
+Después, recarga la ventana: `Ctrl+Shift+P` → *Developer: Reload Window*.
 
-> Instalada así, **VS Code no busca actualizaciones**: no hay aviso ni insignia. Para actualizar hay que descargar el `.vsix` nuevo y repetir el comando (sobrescribe la versión anterior, no hace falta desinstalar).
+También puedes bajar el `.vsix` a mano desde la [página de releases](https://github.com/OmarOporto/vscode-odoo-timesheet/releases) y usar `Ctrl+Shift+P` → **«Extensions: Install from VSIX…»**.
+
+> Instalada desde un `.vsix`, **VS Code no busca actualizaciones**: no hay aviso ni insignia de «Update». Hay que volver a ejecutar el comando de arriba. Sobrescribe la versión anterior; no hace falta desinstalar nada.
 
 ### Desde el código
 
@@ -73,6 +77,8 @@ npm run watch     # esbuild en modo watch
 La tarea nueva se propone con la fecha del día y los mensajes de commit (`08/30 fix login redirect; add user guard`) y **se te asigna**, para que luego aparezca en el panel sin depender del filtro.
 
 Las horas admiten `2.5`, `2,5` y `2:30`.
+
+La descripción se propone con el **mensaje completo** de cada commit —título y cuerpo, colapsado a una línea— recortado a 1000 caracteres. Es solo la sugerencia: lo que se guarda es lo que dejes en la caja, y Odoo no impone ningún límite (`account.analytic.line.name` es un `Char` sin `size`).
 
 **Fijar un proyecto** (icono 📌 sobre el proyecto, o `Odoo: Elegir proyecto`) deja el panel en lista plana con solo esas tareas, y hace que el flujo de registro se salte el paso de proyecto. Se guarda en `settings.json`, así que sobrevive a reinicios.
 

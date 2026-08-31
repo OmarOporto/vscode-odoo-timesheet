@@ -269,5 +269,21 @@ assert.equal(util.pluralize(3, 'commit', 'commits'), '3 commits');
 assert.equal(util.truncate('abcdefg', 4), 'abc…');
 assert.equal(util.truncate('abc', 10), 'abc');
 
+// El cuerpo del commit sí llega a la descripción, colapsado a una línea.
+assert.equal(util.joinCommitText('fix: login', ''), 'fix: login');
+assert.equal(util.joinCommitText('fix: login', '   '), 'fix: login');
+assert.equal(
+  util.joinCommitText('fix: login', 'El guard no cubría\nla sesión\t expirada'),
+  'fix: login — El guard no cubría la sesión expirada',
+);
+assert.equal(util.joinCommitText('', 'solo cuerpo'), 'solo cuerpo');
+assert.equal(util.joinCommitText('', ''), '');
+
+// Y el commit multilínea del repositorio de prueba, extremo a extremo.
+const withBody = util.joinCommitText(multiline.subject, multiline.body);
+assert.ok(withBody.startsWith('feat: agrega guard de usuario — '), withBody);
+assert.ok(withBody.includes('| pipes'), 'no se pierde el contenido del cuerpo');
+assert.ok(!withBody.includes('\n'), 'la descripción va en una sola línea');
+
 fs.rmSync(TMP, { recursive: true, force: true });
 console.log(`✅ git: ${mine.length} commits propios en ${groups.length} días, y utilidades OK.`);

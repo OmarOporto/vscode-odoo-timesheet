@@ -13,7 +13,9 @@ import {
 } from '../odoo/tasks';
 import { planLines, type LineDate, type LineDraft, type LineMode } from '../lines';
 import { createTimesheetLines, type TimesheetLineInput } from '../odoo/timesheets';
+import type { CommitRegistry } from '../registry';
 import { readPinnedProject, type OdooSession } from '../state';
+import type { RegisteredCommitDecorations } from '../views/commitDecorations';
 import {
   formatDayLabel,
   formatHours,
@@ -33,7 +35,15 @@ export interface LogTimeDeps {
   session: OdooSession;
   commits: CommitsTreeProvider;
   tasks: TasksTreeProvider;
+  registry: CommitRegistry;
+  decorations: RegisteredCommitDecorations;
   log: vscode.LogOutputChannel;
+}
+
+/** Una línea a crear, junto con los commits de los que salió. */
+interface LineEntry {
+  input: TimesheetLineInput;
+  commits: Commit[];
 }
 
 /**
@@ -104,7 +114,7 @@ async function run(deps: LogTimeDeps, node?: unknown): Promise<void> {
     return;
   }
 
-  const selected = await pickCommits(available, preselected);
+  const selected = await pickCommits(available, preselected, deps.registry);
   if (!selected || selected.length === 0) {
     return;
   }
@@ -159,8 +169,8 @@ async function run(deps: LogTimeDeps, node?: unknown): Promise<void> {
     return;
   }
 
-  const lines = await buildLines(planLines(selected, lineDate, mode), mode, task.id, project.id);
-  if (!lines || lines.length === 0) {
+  const entries = await buildLines(planLines(selected, lineDate, mode), mode, task.id, project.id);
+  if (!entries || entries.length === 0) {
     return;
   }
 
@@ -169,13 +179,32 @@ async function run(deps: LogTimeDeps, node?: unknown): Promise<void> {
 
   const ids = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'Registrando horas en Odoo…' },
-    () => createTimesheetLines(client, employeeId, lines),
+    () => createTimesheetLines(client, employeeId, entries.map((entry) => entry.input)),
   );
 
-  const totalHours = lines.reduce((sum, line) => sum + line.hours, 0);
+  const totalHours = entries.reduce((sum, entry) => sum + entry.input.hours, 0);
   deps.log.info(
     `Creadas ${ids.length} líneas (${formatHours(totalHours)}) en la tarea #${task.id} «${task.name}»`,
   );
+
+  // Solo se marcan después de que Odoo confirme: una marca sin línea detrás
+  // sería peor que no tener marca.
+  const at = new Date().toISOString();
+  const marked = entries.flatMap((entry) =>
+    entry.commits.map((commit) => ({
+      hash: commit.hash,
+      info: {
+        taskId: task.id,
+        taskName: task.name,
+        hours: entry.input.hours,
+        day: entry.input.date,
+        at,
+      },
+    })),
+  );
+  await deps.registry.record(marked);
+  deps.decorations.refresh(marked.map((entry) => entry.hash));
+  deps.commits.redraw();
   deps.tasks.refresh();
 
   const action = await vscode.window.showInformationMessage(
@@ -196,6 +225,7 @@ interface CommitItem extends vscode.QuickPickItem {
 async function pickCommits(
   available: Commit[],
   preselected: Commit[],
+  registry: CommitRegistry,
 ): Promise<Commit[] | undefined> {
   const preselectedHashes = new Set(preselected.map((commit) => commit.hash));
   const items: CommitItem[] = [];
@@ -203,9 +233,14 @@ async function pickCommits(
   for (const group of groupByDay(available)) {
     items.push({ label: formatDayLabel(group.day), kind: vscode.QuickPickItemKind.Separator });
     for (const commit of group.commits) {
+      // Se avisa, pero no se excluye ni se desmarca: volver a registrar un
+      // commit es legítimo.
+      const registered = registry.get(commit.hash);
       items.push({
         label: commit.subject || '(sin mensaje)',
-        description: `${commit.time} · ${commit.shortHash}`,
+        description: registered
+          ? `${commit.time} · ${commit.shortHash} · ✓ registrado (${formatHours(registered.hours)})`
+          : `${commit.time} · ${commit.shortHash}`,
         detail: commit.body ? truncate(commit.body.replace(/\s+/g, ' '), 120) : undefined,
         picked: preselectedHashes.has(commit.hash),
         commit,
@@ -534,8 +569,8 @@ async function buildLines(
   mode: LineMode,
   taskId: number,
   projectId: number,
-): Promise<TimesheetLineInput[] | undefined> {
-  const lines: TimesheetLineInput[] = [];
+): Promise<LineEntry[] | undefined> {
+  const lines: LineEntry[] = [];
 
   for (const draft of drafts) {
     const suggested = truncate(
@@ -559,7 +594,10 @@ async function buildLines(
       return undefined;
     }
 
-    lines.push({ date: draft.day, description, hours, taskId, projectId });
+    lines.push({
+      input: { date: draft.day, description, hours, taskId, projectId },
+      commits: draft.commits,
+    });
   }
 
   return lines;

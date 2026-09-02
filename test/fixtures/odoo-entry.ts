@@ -17,3 +17,5 @@ export {
 export { resolveEmployeeId, createTimesheetLines } from '../../src/odoo/timesheets';
 export { diagnoseMissingTasks } from '../../src/odoo/diagnostics';
 export { formatTaskDate, daysAgo } from '../../src/util';
+// registry.ts no importa `vscode`: se puede empaquetar sin stub.
+export { CommitRegistry, pruneRegistry, REGISTRY_KEY } from '../../src/registry';

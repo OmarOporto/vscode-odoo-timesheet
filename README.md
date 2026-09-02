@@ -91,6 +91,10 @@ La descripción se propone con el **mensaje completo** de cada commit —título
 
 **Fijar un proyecto** (icono 📌 sobre el proyecto, o `Odoo: Elegir proyecto`) deja el panel en lista plana con solo esas tareas, y hace que el flujo de registro se salte el paso de proyecto. Se guarda en `settings.json`, así que sobrevive a reinicios.
 
+**Los commits ya registrados** aparecen en verde con una insignia `✓`, tanto en el panel como en el selector, y el tooltip dice cuántas horas y en qué tarea. Es solo una ayuda visual: **se pueden volver a seleccionar** sin restricción.
+
+> La marca se guarda en la extensión, no en Odoo — `account.analytic.line` no tiene ningún campo libre aparte de la descripción, y meter ahí el hash lo vería todo tu equipo. La contrapartida: si borras una línea en Odoo, la marca se queda. Se limpia con **«Odoo: Olvidar la marca de registrado»** sobre el commit, o **«…todas las marcas»** de golpe.
+
 **La fecha** se pregunta solo cuando aporta algo: si todos los commits son de hoy, el paso se salta. Si prefieres no decidirlo cada vez, `odooTimesheet.lineDate` acepta `today` o `commit` y el diálogo desaparece.
 
 > Cuidado con una consecuencia: si eliges **una fecha única** para commits de varios días, el modo agrupado crea **una sola línea** con todo — dos líneas con la misma fecha y la misma tarea no aportarían nada. Con **la fecha del commit** sí se crea una línea por día.
@@ -154,6 +158,7 @@ Bloque completo listo para pegar:
 | `odooTimesheet.includeMerges` | `false` | Incluir commits de merge |
 | `odooTimesheet.taskScope` | `mine` | `mine`, `assigned`, `timesheet` o `all` |
 | `odooTimesheet.lineDate` | `ask` | `ask`, `today` o `commit` |
+| `odooTimesheet.markRegisteredCommits` | `true` | Marcar en verde los commits ya imputados |
 | `odooTimesheet.taskOrder` | `created` | `created`, `updated` o `name` |
 | `odooTimesheet.tasksPerProject` | `10` | Tareas por proyecto antes de «Mostrar más» |
 | `odooTimesheet.taskLimit` | `50` | Máximo de tareas en las **búsquedas** |

@@ -170,6 +170,16 @@
         "category": "Odoo"
       },
       {
+        "command": "odooTimesheet.forgetCommitMark",
+        "title": "Olvidar la marca de registrado",
+        "category": "Odoo"
+      },
+      {
+        "command": "odooTimesheet.clearCommitMarks",
+        "title": "Olvidar todas las marcas de commits registrados",
+        "category": "Odoo"
+      },
+      {
         "command": "odooTimesheet.showLog",
         "title": "Mostrar registro de diagnóstico",
         "category": "Odoo"
@@ -256,7 +266,7 @@
       "view/item/context": [
         {
           "command": "odooTimesheet.logTime",
-          "when": "view == odooTimesheet.commits && viewItem =~ /^(day|commit)$/",
+          "when": "view == odooTimesheet.commits && viewItem =~ /^(day|commit|commitRegistered)$/",
           "group": "inline@1"
         },
         {
@@ -276,8 +286,13 @@
         },
         {
           "command": "odooTimesheet.copyCommitHash",
-          "when": "viewItem == commit",
+          "when": "viewItem =~ /^commit/",
           "group": "1_git@1"
+        },
+        {
+          "command": "odooTimesheet.forgetCommitMark",
+          "when": "viewItem == commitRegistered",
+          "group": "1_git@2"
         }
       ],
       "commandPalette": [
@@ -287,6 +302,10 @@
         },
         {
           "command": "odooTimesheet.copyCommitHash",
+          "when": "false"
+        },
+        {
+          "command": "odooTimesheet.forgetCommitMark",
           "when": "false"
         },
         {
@@ -409,6 +428,11 @@
           "minimum": 5,
           "maximum": 500,
           "description": "Número máximo de tareas a traer en las BÚSQUEDAS (el filtro de texto y el selector del flujo de registro)."
+        },
+        "odooTimesheet.markRegisteredCommits": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Marcar en verde, con una insignia ✓, los commits que ya se convirtieron en horas. Es solo una ayuda visual: **se pueden seguir seleccionando**. La marca se guarda en la extensión, no en Odoo, así que si borras una línea allí queda obsoleta — usa «Odoo: Olvidar la marca de registrado»."
         },
         "odooTimesheet.lineDate": {
           "type": "string",

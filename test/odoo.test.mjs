@@ -46,6 +46,9 @@ const {
   createTimesheetLines,
   diagnoseMissingTasks,
   formatTaskDate,
+  CommitRegistry,
+  pruneRegistry,
+  REGISTRY_KEY,
 } = require(path.join(TMP, 'odoo.cjs'));
 
 const odoo = createOdooServer();
@@ -103,6 +106,103 @@ assert.equal(formatTaskDate('2026-08-26', 'MM/DD'), '08/26');
 assert.equal(formatTaskDate('2026-08-26', 'DD/MM'), '26/08');
 assert.equal(formatTaskDate('2026-08-26', 'YYYY-MM-DD'), '2026-08-26');
 assert.equal(formatTaskDate('2026-08-26', ''), '', 'sin formato, sin prefijo');
+
+// ---------------------------------------------------------------------------
+// Registro de commits ya imputados
+// ---------------------------------------------------------------------------
+function fakeStore(initial = {}) {
+  const data = { [REGISTRY_KEY]: initial };
+  return {
+    saved: 0,
+    get(key, fallback) {
+      return key in data ? data[key] : fallback;
+    },
+    update(key, value) {
+      data[key] = value;
+      this.saved += 1;
+      return Promise.resolve();
+    },
+    raw: () => data[REGISTRY_KEY],
+  };
+}
+
+const info = (overrides = {}) => ({
+  taskId: 2488,
+  taskName: '08/29 Fix Alejandro Bridge',
+  hours: 2.5,
+  day: '2026-08-29',
+  at: '2026-08-29T18:00:00.000Z',
+  ...overrides,
+});
+
+{
+  const store = fakeStore();
+  const registry = new CommitRegistry(store);
+
+  assert.equal(registry.isRegistered('abc'), false, 'un hash desconocido no está registrado');
+  assert.equal(registry.get('abc'), undefined);
+  assert.equal(registry.size, 0);
+
+  await registry.record([
+    { hash: 'aaa', info: info() },
+    { hash: 'bbb', info: info({ hours: 8 }) },
+  ]);
+  assert.equal(registry.isRegistered('aaa'), true);
+  assert.equal(registry.get('bbb').hours, 8);
+  assert.equal(registry.size, 2);
+
+  // Registrar de nuevo el mismo hash sobrescribe, no duplica.
+  await registry.record([{ hash: 'aaa', info: info({ hours: 4, taskId: 9999 }) }]);
+  assert.equal(registry.size, 2);
+  assert.equal(registry.get('aaa').hours, 4);
+  assert.equal(registry.get('aaa').taskId, 9999);
+
+  // Lo persistido debe ser JSON plano para sobrevivir a la sincronización.
+  assert.deepEqual(JSON.parse(JSON.stringify(store.raw())), store.raw());
+
+  await registry.forget(['aaa']);
+  assert.equal(registry.isRegistered('aaa'), false);
+  assert.equal(registry.isRegistered('bbb'), true, 'olvidar uno no toca a los demás');
+
+  const before = store.saved;
+  await registry.forget(['no-existe']);
+  assert.equal(store.saved, before, 'olvidar algo inexistente no escribe');
+
+  await registry.record([]);
+  assert.equal(store.saved, before, 'registrar una lista vacía tampoco escribe');
+
+  await registry.clear();
+  assert.equal(registry.size, 0);
+}
+
+{
+  // Se relee lo que dejó una sesión anterior.
+  const store = fakeStore({ ccc: info() });
+  const registry = new CommitRegistry(store);
+  assert.equal(registry.isRegistered('ccc'), true, 'el estado guardado se recupera');
+}
+
+{
+  // La poda conserva los más recientes por `at`.
+  const map = {
+    viejo: info({ at: '2026-01-01T00:00:00.000Z' }),
+    medio: info({ at: '2026-06-01T00:00:00.000Z' }),
+    nuevo: info({ at: '2026-08-31T00:00:00.000Z' }),
+  };
+  assert.deepEqual(Object.keys(pruneRegistry(map, 2)).sort(), ['medio', 'nuevo']);
+  assert.equal(pruneRegistry(map, 3), map, 'por debajo del tope devuelve el mismo objeto');
+
+  // Empate en `at`: debe podar de forma determinista, no al azar.
+  const tie = {
+    bbb: info({ at: '2026-08-31T00:00:00.000Z' }),
+    aaa: info({ at: '2026-08-31T00:00:00.000Z' }),
+    ccc: info({ at: '2026-08-31T00:00:00.000Z' }),
+  };
+  const first = Object.keys(pruneRegistry(tie, 2)).sort();
+  const second = Object.keys(pruneRegistry({ ...tie }, 2)).sort();
+  assert.deepEqual(first, second, 'la poda con empates es estable');
+  assert.equal(first.length, 2);
+}
 
 assert.equal(orderClause('created'), 'create_date desc');
 assert.equal(orderClause('updated'), 'write_date desc');

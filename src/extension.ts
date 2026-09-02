@@ -16,7 +16,10 @@ import {
 } from './commands/projects';
 import { selectRepositoryCommand } from './commands/repository';
 import { recordUrl } from './odoo/tasks';
+import { pluralize } from './util';
+import { CommitRegistry, REGISTRY_KEY } from './registry';
 import { OdooSession } from './state';
+import { RegisteredCommitDecorations } from './views/commitDecorations';
 import { CommitNode, CommitsTreeProvider } from './views/commitsTree';
 import { ProjectNode, ShowMoreNode, TaskNode, TasksTreeProvider } from './views/tasksTree';
 
@@ -24,7 +27,13 @@ export function activate(context: vscode.ExtensionContext): void {
   const log = vscode.window.createOutputChannel('Odoo Timesheet', { log: true });
   const session = new OdooSession(context, log);
 
-  const commitsProvider = new CommitsTreeProvider(log);
+  // Si el usuario tiene activada la sincronización de VS Code, las marcas
+  // viajan entre sus instalaciones (Windows y WSL son almacenes distintos).
+  context.globalState.setKeysForSync([REGISTRY_KEY]);
+  const registry = new CommitRegistry(context.globalState);
+  const decorations = new RegisteredCommitDecorations(registry);
+
+  const commitsProvider = new CommitsTreeProvider(log, registry);
   const tasksProvider = new TasksTreeProvider(session, log);
 
   const commitsView = vscode.window.createTreeView('odooTimesheet.commits', {
@@ -47,7 +56,14 @@ export function activate(context: vscode.ExtensionContext): void {
   syncTasksHeader();
   syncCommitsHeader();
 
-  const deps = { session, commits: commitsProvider, tasks: tasksProvider, log };
+  const deps = {
+    session,
+    commits: commitsProvider,
+    tasks: tasksProvider,
+    registry,
+    decorations,
+    log,
+  };
 
   context.subscriptions.push(
     log,
@@ -56,6 +72,8 @@ export function activate(context: vscode.ExtensionContext): void {
     tasksProvider,
     commitsView,
     tasksView,
+    decorations,
+    vscode.window.registerFileDecorationProvider(decorations),
 
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('odooTimesheet.projectId')) {
@@ -63,6 +81,10 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       if (event.affectsConfiguration('odooTimesheet.repositoryPath')) {
         syncCommitsHeader();
+      }
+      if (event.affectsConfiguration('odooTimesheet.markRegisteredCommits')) {
+        decorations.refresh();
+        commitsProvider.redraw();
       }
     }),
     commitsProvider.onDidChangeTreeData(() => syncCommitsHeader()),
@@ -187,6 +209,34 @@ export function activate(context: vscode.ExtensionContext): void {
           recordUrl(connection.client.url, connection.client.majorVersion, target.model, target.id),
         ),
       );
+    }),
+
+    vscode.commands.registerCommand('odooTimesheet.forgetCommitMark', async (node?: unknown) => {
+      if (!(node instanceof CommitNode)) {
+        return;
+      }
+      await registry.forget([node.commit.hash]);
+      decorations.refresh([node.commit.hash]);
+      commitsProvider.redraw();
+    }),
+
+    vscode.commands.registerCommand('odooTimesheet.clearCommitMarks', async () => {
+      const count = registry.size;
+      if (count === 0) {
+        void vscode.window.showInformationMessage('No hay commits marcados como registrados.');
+        return;
+      }
+      const answer = await vscode.window.showWarningMessage(
+        `Se olvidarán ${pluralize(count, 'marca', 'marcas')}. Las horas ya registradas en Odoo no se tocan.`,
+        { modal: true },
+        'Olvidar marcas',
+      );
+      if (answer !== 'Olvidar marcas') {
+        return;
+      }
+      await registry.clear();
+      decorations.refresh();
+      commitsProvider.redraw();
     }),
 
     vscode.commands.registerCommand('odooTimesheet.copyCommitHash', async (node?: unknown) => {

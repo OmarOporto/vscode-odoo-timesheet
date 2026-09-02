@@ -9,7 +9,9 @@ import {
   watchRepositories,
 } from '../git/gitService';
 import type { Commit } from '../git/types';
-import { formatDayLabel, pluralize, todayLocalDay } from '../util';
+import type { CommitRegistry } from '../registry';
+import { formatDayLabel, formatHours, pluralize, todayLocalDay } from '../util';
+import { commitUri, isEnabled } from './commitDecorations';
 
 export class DayNode {
   constructor(
@@ -50,7 +52,10 @@ export class CommitsTreeProvider
   private loaded = false;
   private loadError: string | undefined;
 
-  constructor(private readonly log: vscode.LogOutputChannel) {
+  constructor(
+    private readonly log: vscode.LogOutputChannel,
+    private readonly registry: CommitRegistry,
+  ) {
     this.disposables.push(
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.refresh()),
       vscode.workspace.onDidChangeConfiguration((event) => {
@@ -71,6 +76,11 @@ export class CommitsTreeProvider
 
   refresh(): void {
     this.loaded = false;
+    this.emitter.fire();
+  }
+
+  /** Repinta sin releer git: basta cuando solo cambió una marca. */
+  redraw(): void {
     this.emitter.fire();
   }
 
@@ -118,8 +128,13 @@ export class CommitsTreeProvider
       item.description = element.showRepository
         ? `${commit.time} · ${repositoryLabel(commit.repository)}`
         : `${commit.time} · ${commit.shortHash}`;
-      item.contextValue = 'commit';
       item.iconPath = new vscode.ThemeIcon('git-commit');
+
+      // La URI sintética es lo que enlaza el nodo con el FileDecorationProvider,
+      // que le pone el color y la insignia si ya se registró.
+      item.resourceUri = commitUri(commit.hash);
+      const registered = isEnabled() ? this.registry.get(commit.hash) : undefined;
+      item.contextValue = registered ? 'commitRegistered' : 'commit';
 
       // appendText escapa el markdown: el mensaje de commit es texto arbitrario.
       const tooltip = new vscode.MarkdownString();
@@ -129,6 +144,11 @@ export class CommitsTreeProvider
       }
       tooltip.appendText(`\n\n${commit.authorName} · ${commit.day} ${commit.time} · ${commit.shortHash}`);
       tooltip.appendText(`\n${repositoryLabel(commit.repository)}`);
+      if (registered) {
+        tooltip.appendText(
+          `\n\n✓ Ya registrado: ${formatHours(registered.hours)} en «${registered.taskName}» el ${registered.day}`,
+        );
+      }
       item.tooltip = tooltip;
       return item;
     }

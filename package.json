@@ -1,8 +1,8 @@
 {
   "name": "odoo-timesheet",
-  "displayName": "Odoo Timesheet 0.1.4",
+  "displayName": "Odoo Timesheet 0.1.5",
   "description": "Convierte tus commits diarios en líneas de horas en Odoo, sin salir de VS Code.",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "BlueSentinel",
   "private": true,
   "license": "MIT",
@@ -29,7 +29,7 @@
       "activitybar": [
         {
           "id": "odooTimesheet",
-          "title": "Odoo Timesheet 0.1.4",
+          "title": "Odoo Timesheet 0.1.5",
           "icon": "media/odoo.svg"
         }
       ]

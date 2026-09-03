@@ -12,6 +12,20 @@ import { readSettings, type OdooSession } from '../state';
 const GLOBAL = vscode.ConfigurationTarget.Global;
 
 /**
+ * Datos del proceso en marcha. Importa sobre todo la versión: una ventana
+ * abierta desde antes de actualizar sigue ejecutando el código viejo, y sin
+ * esto no hay forma de distinguirlo de un fallo de la extensión.
+ */
+export interface RuntimeInfo {
+  version: string;
+  /** `local`, `wsl`, `ssh-remote`… */
+  host: string;
+  marks: number;
+}
+
+export type RuntimeInfoProvider = () => RuntimeInfo;
+
+/**
  * Flujo de conexión.
  *
  * Con JSON-2 basta la URL y una API key: la propia key identifica al usuario y
@@ -141,8 +155,9 @@ export async function changePasswordCommand(
 export async function testConnectionCommand(
   session: OdooSession,
   log: vscode.LogOutputChannel,
+  runtime: RuntimeInfoProvider,
 ): Promise<void> {
-  logConfiguration(log);
+  logConfiguration(log, runtime);
 
   if (!session.isConnected) {
     log.warn('Sin conexión activa: se abrirá el flujo de conexión.');
@@ -202,7 +217,22 @@ export async function testConnectionCommand(
  * Vuelca la configuración resuelta y **de qué ámbito viene cada valor**, que es
  * justo lo que hace falta para saber qué archivo editar a mano.
  */
-export function logConfiguration(log: vscode.LogOutputChannel): void {
+export function logConfiguration(
+  log: vscode.LogOutputChannel,
+  runtime: RuntimeInfoProvider,
+): void {
+  const now = runtime();
+  log.info(
+    [
+      'Extensión en marcha:',
+      `  Versión        ${now.version}`,
+      `  Host           ${now.host}`,
+      `  Commits marcados ${now.marks}`,
+      '  Si la versión no es la que instalaste, esta ventana sigue ejecutando el código anterior:',
+      '  recárgala con «Developer: Reload Window».',
+    ].join('\n'),
+  );
+
   const config = vscode.workspace.getConfiguration('odooTimesheet');
   const keys = [
     'url',

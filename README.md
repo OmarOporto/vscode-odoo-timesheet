@@ -29,6 +29,10 @@ También puedes bajar el `.vsix` a mano desde la [página de releases](https://g
 
 > Instalada desde un `.vsix`, **VS Code no busca actualizaciones**: no hay aviso ni insignia de «Update». Hay que volver a ejecutar el comando de arriba. Sobrescribe la versión anterior; no hace falta desinstalar nada.
 
+**Recarga la ventana después de actualizar** (`Ctrl+Shift+P` → *Developer: Reload Window*). Instalar el `.vsix` deja el código nuevo en disco, pero una ventana ya abierta **sigue ejecutando el anterior** hasta que la recargas — y eso se confunde fácilmente con un fallo de la extensión.
+
+Por eso la cabecera del panel lleva la versión: si dice `ODOO TIMESHEET 0.1.4` cuando acabas de instalar la `0.1.5`, esa ventana está vieja. El comando **«Odoo: Mostrar registro de diagnóstico»** también la indica, junto al host (`local`, `wsl`…).
+
 ### Desde el código
 
 ```bash

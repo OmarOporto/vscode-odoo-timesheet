@@ -38,19 +38,27 @@ jobs:
             exit 1
           fi
 
-          # displayName lleva la versión pegada para poder verla en el panel de
-          # Extensiones. Lo sincroniza el hook `version` de npm; si alguien edita
-          # package.json a mano, aquí se detecta antes de publicar algo que miente.
+          # Los dos nombres visibles llevan la versión pegada: displayName para el
+          # gestor de extensiones, y el título del contenedor para la cabecera del
+          # panel, que es donde se detecta que una ventana quedó con código viejo.
+          # Los sincroniza el hook `version` de npm; si alguien edita package.json
+          # a mano, aquí se detecta antes de publicar algo que miente.
           DISPLAY=$(node -p "require('./package.json').displayName")
-          case "$DISPLAY" in
-            *" ${MANIFEST}") ;;
-            *)
-              echo "::error::displayName «${DISPLAY}» no termina en ${MANIFEST}. Sube la versión con \`npm version\`, que lo sincroniza."
-              exit 1
-              ;;
-          esac
+          CONTAINER=$(node -p "require('./package.json').contributes.viewsContainers.activitybar[0].title")
 
-          echo "Versión ${MANIFEST} · ${DISPLAY}"
+          for pair in "displayName|$DISPLAY" "viewsContainers.title|$CONTAINER"; do
+            FIELD="${pair%%|*}"
+            VALUE="${pair#*|}"
+            case "$VALUE" in
+              *" ${MANIFEST}") ;;
+              *)
+                echo "::error::${FIELD} «${VALUE}» no termina en ${MANIFEST}. Sube la versión con \`npm version\`, que lo sincroniza."
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "Versión ${MANIFEST} · ${DISPLAY} · panel «${CONTAINER}»"
 
       - run: npm run typecheck
 

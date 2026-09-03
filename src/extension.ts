@@ -5,6 +5,7 @@ import {
   disconnectCommand,
   logConfiguration,
   testConnectionCommand,
+  type RuntimeInfo,
 } from './commands/connect';
 import { diagnoseTasksCommand } from './commands/diagnose';
 import { logTimeCommand } from './commands/logTime';
@@ -27,11 +28,21 @@ export function activate(context: vscode.ExtensionContext): void {
   const log = vscode.window.createOutputChannel('Odoo Timesheet', { log: true });
   const session = new OdooSession(context, log);
 
+  // Primera línea del registro: la versión que de verdad se cargó. Una ventana
+  // abierta desde antes de actualizar sigue ejecutando el código anterior, y sin
+  // esto se confunde con un fallo de la extensión.
+  const version = String(context.extension.packageJSON.version ?? 'desconocida');
+  const host = vscode.env.remoteName ?? 'local';
+  log.info(`Odoo Timesheet ${version} activada · host ${host}`);
+
   // Si el usuario tiene activada la sincronización de VS Code, las marcas
   // viajan entre sus instalaciones (Windows y WSL son almacenes distintos).
   context.globalState.setKeysForSync([REGISTRY_KEY]);
   const registry = new CommitRegistry(context.globalState);
   const decorations = new RegisteredCommitDecorations(registry);
+
+  // Función, no valor: `marks` tiene que reflejar el estado del momento.
+  const runtime = (): RuntimeInfo => ({ version, host, marks: registry.size });
 
   const commitsProvider = new CommitsTreeProvider(log, registry);
   const tasksProvider = new TasksTreeProvider(session, log);
@@ -95,13 +106,13 @@ export function activate(context: vscode.ExtensionContext): void {
       changePasswordCommand(session, log),
     ),
     vscode.commands.registerCommand('odooTimesheet.testConnection', () =>
-      testConnectionCommand(session, log),
+      testConnectionCommand(session, log, runtime),
     ),
     vscode.commands.registerCommand('odooTimesheet.diagnoseTasks', () =>
       diagnoseTasksCommand(session, log),
     ),
     vscode.commands.registerCommand('odooTimesheet.showLog', () => {
-      logConfiguration(log);
+      logConfiguration(log, runtime);
       log.show();
     }),
 

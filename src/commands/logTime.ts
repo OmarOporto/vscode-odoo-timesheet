@@ -203,6 +203,11 @@ async function run(deps: LogTimeDeps, node?: unknown): Promise<void> {
     })),
   );
   await deps.registry.record(marked);
+  // Sin esta línea no hay forma de distinguir «no se marcó» de «se marcó pero
+  // no se pinta» cuando algo va mal.
+  deps.log.info(
+    `Marcados ${marked.length} commits como registrados (${deps.registry.size} en total)`,
+  );
   deps.decorations.refresh(marked.map((entry) => entry.hash));
   deps.commits.redraw();
   deps.tasks.refresh();

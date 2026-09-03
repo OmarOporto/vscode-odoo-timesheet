@@ -29,7 +29,7 @@
       "activitybar": [
         {
           "id": "odooTimesheet",
-          "title": "Odoo Timesheet",
+          "title": "Odoo Timesheet 0.1.4",
           "icon": "media/odoo.svg"
         }
       ]

@@ -28,6 +28,7 @@ import {
   truncate,
 } from '../util';
 import { CommitNode, DayNode, type CommitsTreeProvider } from '../views/commitsTree';
+import type { HoursTreeProvider } from '../views/hoursTree';
 import { ProjectNode, TaskNode, type TasksTreeProvider } from '../views/tasksTree';
 import { pickProject } from './projects';
 
@@ -35,6 +36,7 @@ export interface LogTimeDeps {
   session: OdooSession;
   commits: CommitsTreeProvider;
   tasks: TasksTreeProvider;
+  hours: HoursTreeProvider;
   registry: CommitRegistry;
   decorations: RegisteredCommitDecorations;
   log: vscode.LogOutputChannel;
@@ -211,6 +213,8 @@ async function run(deps: LogTimeDeps, node?: unknown): Promise<void> {
   deps.decorations.refresh(marked.map((entry) => entry.hash));
   deps.commits.redraw();
   deps.tasks.refresh();
+  // Acaban de aparecer líneas nuevas en Odoo: refresh, no redraw.
+  deps.hours.refresh();
 
   const action = await vscode.window.showInformationMessage(
     `${pluralize(ids.length, 'línea registrada', 'líneas registradas')} · ${formatHours(totalHours)} en «${truncate(task.name, 40)}».`,

@@ -107,6 +107,29 @@ export const LINES = [
   { id: 6, task_id: [2488, TASKS[1].name], project_id: [12, 'DEV EQUIPO'], date: dayOffset(1), unit_amount: 9, user_id: 99 },
 ];
 
+/**
+ * Líneas para la vista de horas del mes.
+ *
+ * Fechas **absolutas** y no `dayOffset`: con fechas relativas, el día 1 de
+ * cualquier mes cae en el mes anterior según cuándo se ejecute el test, y las
+ * aserciones por mes serían intermitentes.
+ *
+ * Y en 2020 a propósito: queda fuera de cualquier ventana del diagnóstico (60
+ * días como mucho), así que no altera sus aserciones sobre LINES.
+ */
+export const MONTH_LINES = [
+  { id: 10, date: '2020-03-15', unit_amount: 2.5, task_id: [2488, TASKS[1].name], project_id: [12, 'DEV EQUIPO'], user_id: UID },
+  { id: 11, date: '2020-03-15', unit_amount: 3.5, task_id: [2488, TASKS[1].name], project_id: [12, 'DEV EQUIPO'], user_id: UID },
+  // Sin tarea, imputada al proyecto: son horas reales y tienen que contar.
+  { id: 12, date: '2020-03-02', unit_amount: 6.5, task_id: false, project_id: [12, 'DEV EQUIPO'], user_id: UID },
+  // De otra persona.
+  { id: 13, date: '2020-03-10', unit_amount: 9, task_id: [2488, TASKS[1].name], project_id: [12, 'DEV EQUIPO'], user_id: 99 },
+  // Analítica sin proyecto (una factura, un gasto): no es una hoja de horas.
+  { id: 14, date: '2020-03-20', unit_amount: 4, task_id: false, project_id: false, user_id: UID },
+  // Fuera del rango del mes.
+  { id: 15, date: '2020-04-01', unit_amount: 7, task_id: [2488, TASKS[1].name], project_id: [12, 'DEV EQUIPO'], user_id: UID },
+];
+
 // --- Evaluación de dominios --------------------------------------------------
 
 function resolve(field, record) {
@@ -308,7 +331,7 @@ export function createOdooServer() {
     }
 
     if (model === 'account.analytic.line' && method === 'search_read') {
-      return searchRead(LINES, params);
+      return searchRead([...LINES, ...MONTH_LINES], params);
     }
     if (model === 'account.analytic.line' && method === 'create') {
       return scenario === 'single-id'

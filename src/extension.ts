@@ -8,6 +8,7 @@ import {
   type RuntimeInfo,
 } from './commands/connect';
 import { diagnoseTasksCommand } from './commands/diagnose';
+import { toggleHolidayCommand } from './commands/hours';
 import { logTimeCommand } from './commands/logTime';
 import {
   describeTasksView,
@@ -22,6 +23,8 @@ import { CommitRegistry, REGISTRY_KEY } from './registry';
 import { OdooSession } from './state';
 import { RegisteredCommitDecorations } from './views/commitDecorations';
 import { CommitNode, CommitsTreeProvider } from './views/commitsTree';
+import { HolidayDecorations } from './views/hoursDecorations';
+import { HoursTreeProvider } from './views/hoursTree';
 import { ProjectNode, ShowMoreNode, TaskNode, TasksTreeProvider } from './views/tasksTree';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -46,6 +49,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const commitsProvider = new CommitsTreeProvider(log, registry);
   const tasksProvider = new TasksTreeProvider(session, log);
+  const hoursProvider = new HoursTreeProvider(session, log);
+  const holidayDecorations = new HolidayDecorations();
 
   const commitsView = vscode.window.createTreeView('odooTimesheet.commits', {
     treeDataProvider: commitsProvider,
@@ -54,6 +59,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const tasksView = vscode.window.createTreeView('odooTimesheet.tasks', {
     treeDataProvider: tasksProvider,
     showCollapseAll: true,
+  });
+  // Sin showCollapseAll: la vista de horas es una lista plana.
+  const hoursView = vscode.window.createTreeView('odooTimesheet.hours', {
+    treeDataProvider: hoursProvider,
   });
 
   const syncTasksHeader = (): void => {
@@ -64,13 +73,20 @@ export function activate(context: vscode.ExtensionContext): void {
       commitsView.description = description;
     });
   };
+  const syncHoursHeader = (): void => {
+    void hoursProvider.describeMonth().then((description) => {
+      hoursView.description = description;
+    });
+  };
   syncTasksHeader();
   syncCommitsHeader();
+  syncHoursHeader();
 
   const deps = {
     session,
     commits: commitsProvider,
     tasks: tasksProvider,
+    hours: hoursProvider,
     registry,
     decorations,
     log,
@@ -81,10 +97,14 @@ export function activate(context: vscode.ExtensionContext): void {
     session,
     commitsProvider,
     tasksProvider,
+    hoursProvider,
     commitsView,
     tasksView,
+    hoursView,
     decorations,
+    holidayDecorations,
     vscode.window.registerFileDecorationProvider(decorations),
+    vscode.window.registerFileDecorationProvider(holidayDecorations),
 
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('odooTimesheet.projectId')) {
@@ -97,8 +117,17 @@ export function activate(context: vscode.ExtensionContext): void {
         decorations.refresh();
         commitsProvider.redraw();
       }
+      if (
+        event.affectsConfiguration('odooTimesheet.hoursHolidays') ||
+        event.affectsConfiguration('odooTimesheet.hoursWorkdays')
+      ) {
+        // El árbol se repinta solo; el color de la fila lo lleva el proveedor de
+        // decoraciones, que hay que avisar aparte.
+        holidayDecorations.refresh();
+      }
     }),
     commitsProvider.onDidChangeTreeData(() => syncCommitsHeader()),
+    hoursProvider.onDidChangeTreeData(() => syncHoursHeader()),
 
     vscode.commands.registerCommand('odooTimesheet.connect', () => connectCommand(session, log)),
     vscode.commands.registerCommand('odooTimesheet.disconnect', () => disconnectCommand(session)),
@@ -127,6 +156,15 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand('odooTimesheet.refreshCommits', () => commitsProvider.refresh()),
     vscode.commands.registerCommand('odooTimesheet.refreshTasks', () => tasksProvider.refresh()),
+    vscode.commands.registerCommand('odooTimesheet.refreshHours', () => hoursProvider.refresh()),
+    // Un único manejador para las dos direcciones: el menú decide cuál ofrecer
+    // según el contextValue del día, así que nunca se ven las dos a la vez.
+    vscode.commands.registerCommand('odooTimesheet.markHoliday', (node?: unknown) =>
+      toggleHolidayCommand(node),
+    ),
+    vscode.commands.registerCommand('odooTimesheet.unmarkHoliday', (node?: unknown) =>
+      toggleHolidayCommand(node),
+    ),
 
     vscode.commands.registerCommand('odooTimesheet.selectRepository', () =>
       selectRepositoryCommand(log),

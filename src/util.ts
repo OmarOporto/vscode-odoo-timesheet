@@ -1,4 +1,7 @@
 const DAY_FORMATTER = new Intl.DateTimeFormat('es', { weekday: 'long', day: 'numeric', month: 'long' });
+// Solo el mes: con `year` incluido, el español intercala un «de» («septiembre
+// de 2026») que luego no hay forma limpia de recortar.
+const MONTH_FORMATTER = new Intl.DateTimeFormat('es', { month: 'long' });
 
 /** `YYYY-MM-DD` en hora local, sin pasar por UTC (toISOString movería los commits nocturnos). */
 export function toLocalDay(date: Date): string {
@@ -38,6 +41,53 @@ export function parseIsoDay(text: string): string | undefined {
 /** El día local de hace N días, `YYYY-MM-DD`. */
 export function daysAgo(days: number, today = new Date()): string {
   return toLocalDay(new Date(today.getFullYear(), today.getMonth(), today.getDate() - days));
+}
+
+/**
+ * `YYYY-MM` del día dado. Corte de cadena, no aritmética de fechas: `date` de
+ * Odoo no lleva hora ni zona, así que el mes ya está escrito en el string.
+ */
+export function monthOf(day: string): string {
+  return day.slice(0, 7);
+}
+
+/** El mes actual en hora local. */
+export function currentMonth(): string {
+  return monthOf(todayLocalDay());
+}
+
+/**
+ * Primer y último día de un `YYYY-MM`, ambos inclusive.
+ *
+ * El día 0 del mes siguiente es el último del actual, así que los bisiestos
+ * salen solos y no hace falta una tabla de días por mes.
+ */
+export function monthRange(month: string): { from: string; to: string } {
+  const [year, index] = month.split('-').map(Number);
+  const last = new Date(year, index, 0);
+  return { from: `${month}-01`, to: toLocalDay(last) };
+}
+
+/** Todos los días entre `from` y `to`, ambos inclusive, en orden ascendente. */
+export function eachDay(from: string, to: string): string[] {
+  const days: string[] = [];
+  for (let day = from; day <= to; day = shiftDay(day, 1)) {
+    days.push(day);
+  }
+  return days;
+}
+
+/** 0 = domingo … 6 = sábado, en hora local. */
+export function weekdayOf(day: string): number {
+  const [year, month, date] = day.split('-').map(Number);
+  return new Date(year, month - 1, date).getDay();
+}
+
+/** «Septiembre». Sin el año: la vista solo muestra el mes en curso. */
+export function formatMonthName(month: string): string {
+  const [year, index] = month.split('-').map(Number);
+  const label = MONTH_FORMATTER.format(new Date(year, index - 1, 1));
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function shiftDay(day: string, delta: number): string {
@@ -81,7 +131,8 @@ export function parseHours(input: string): number | undefined {
   return round2(value);
 }
 
-function round2(value: number): number {
+/** Redondeo a céntimos de hora. Lo comparten `parseHours` y el resumen mensual. */
+export function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 

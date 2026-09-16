@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { OdooClient, OdooError, type ApiPreference, type OdooCredentials } from './odoo/client';
 import { detectSchema, type OdooSchema } from './odoo/schema';
 import { resolveEmployeeId } from './odoo/timesheets';
+import { parseIsoDay } from './util';
 
 const SECRET_KEY = 'odooTimesheet.password';
 const GLOBAL = vscode.ConfigurationTarget.Global;
@@ -51,6 +52,33 @@ export async function writePinnedProject(project: PinnedProject | undefined): Pr
     'odooTimesheet.projectPinned',
     project !== undefined,
   );
+}
+
+/**
+ * Los festivos también viven en `settings.json`: se marcan desde la vista, pero
+ * hay que poder pegar el calendario del año de una vez, y que viajen con la
+ * sincronización de ajustes.
+ */
+export function readHolidays(): string[] {
+  const days = vscode.workspace.getConfiguration('odooTimesheet').get<string[]>('hoursHolidays', []);
+  // Filtrado defensivo: esto lo edita gente a mano y una fecha mal escrita no
+  // debe descuadrar el mes en silencio.
+  return days.map((day) => parseIsoDay(String(day))).filter((day): day is string => Boolean(day));
+}
+
+/** Añade o quita un día de la lista, siempre ordenada y sin repetidos. */
+export async function toggleHoliday(day: string): Promise<boolean> {
+  const current = new Set(readHolidays());
+  const isHoliday = !current.has(day);
+  if (isHoliday) {
+    current.add(day);
+  } else {
+    current.delete(day);
+  }
+  await vscode.workspace
+    .getConfiguration('odooTimesheet')
+    .update('hoursHolidays', [...current].sort(), GLOBAL);
+  return isHoliday;
 }
 
 export class OdooSession implements vscode.Disposable {

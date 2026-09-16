@@ -43,6 +43,10 @@
         {
           "id": "odooTimesheet.tasks",
           "name": "Tareas de Odoo"
+        },
+        {
+          "id": "odooTimesheet.hours",
+          "name": "Horas del mes"
         }
       ]
     },
@@ -55,6 +59,11 @@
       {
         "view": "odooTimesheet.tasks",
         "contents": "Conéctate a Odoo para ver tus tareas y registrar horas desde tus commits.\n[Conectar a Odoo](command:odooTimesheet.connect)",
+        "when": "!odooTimesheet.connected"
+      },
+      {
+        "view": "odooTimesheet.hours",
+        "contents": "Conéctate a Odoo para ver las horas que ya tienes registradas.\n[Conectar a Odoo](command:odooTimesheet.connect)",
         "when": "!odooTimesheet.connected"
       }
     ],
@@ -128,6 +137,24 @@
         "title": "Refrescar tareas",
         "category": "Odoo",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "odooTimesheet.refreshHours",
+        "title": "Refrescar horas",
+        "category": "Odoo",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "odooTimesheet.markHoliday",
+        "title": "Marcar como festivo",
+        "category": "Odoo",
+        "icon": "$(calendar)"
+      },
+      {
+        "command": "odooTimesheet.unmarkHoliday",
+        "title": "Quitar el festivo",
+        "category": "Odoo",
+        "icon": "$(close)"
       },
       {
         "command": "odooTimesheet.searchTasks",
@@ -218,6 +245,11 @@
           "group": "navigation@3"
         },
         {
+          "command": "odooTimesheet.refreshHours",
+          "when": "view == odooTimesheet.hours",
+          "group": "navigation@1"
+        },
+        {
           "command": "odooTimesheet.unpinProject",
           "when": "view == odooTimesheet.tasks && odooTimesheet.projectPinned",
           "group": "1_project@1"
@@ -285,19 +317,33 @@
           "group": "1_odoo@1"
         },
         {
+          "command": "odooTimesheet.markHoliday",
+          "when": "view == odooTimesheet.hours && viewItem == hoursDay",
+          "group": "inline@1"
+        },
+        {
+          "command": "odooTimesheet.unmarkHoliday",
+          "when": "view == odooTimesheet.hours && viewItem == hoursDayHoliday",
+          "group": "inline@1"
+        },
+        {
           "command": "odooTimesheet.copyCommitHash",
-          "when": "viewItem =~ /^commit/",
+          "when": "view == odooTimesheet.commits && viewItem =~ /^commit/",
           "group": "1_git@1"
         },
         {
           "command": "odooTimesheet.forgetCommitMark",
-          "when": "viewItem == commitRegistered",
+          "when": "view == odooTimesheet.commits && viewItem == commitRegistered",
           "group": "1_git@2"
         }
       ],
       "commandPalette": [
         {
           "command": "odooTimesheet.showMoreTasks",
+          "when": "false"
+        },
+        {
+          "command": "odooTimesheet.unmarkHoliday",
           "when": "false"
         },
         {
@@ -470,6 +516,39 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Asignarte las tareas que crees desde la extensión. Recomendado: una tarea sin asignados no aparece con `taskScope: assigned`."
+        },
+        "odooTimesheet.hoursDailyTarget": {
+          "type": "number",
+          "default": 8,
+          "minimum": 0,
+          "maximum": 24,
+          "markdownDescription": "Horas que esperas imputar cada día laborable. En la vista «Horas del mes», los días por debajo se marcan con un aviso y la cabecera compara el acumulado contra la meta. `0` desactiva las marcas.\n\nNo conoce tu calendario laboral: un festivo o un día de vacaciones aparecerá como incompleto."
+        },
+        "odooTimesheet.hoursWorkdays": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 6
+          },
+          "default": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "markdownDescription": "Qué días de la semana cuentan como laborables para la meta. `0` es domingo y `6` sábado; por defecto, de lunes a sábado. Los días no laborables no reclaman horas y solo aparecen en la vista si tienen alguna.\n\nPara una semana de lunes a viernes: `[1, 2, 3, 4, 5]`."
+        },
+        "odooTimesheet.hoursHolidays": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "default": [],
+          "markdownDescription": "Días festivos, en formato `AAAA-MM-DD`. No cuentan para la meta ni suman al total esperado del mes.\n\nSe marcan con el botón 📅 sobre un día en la vista «Horas del mes», pero puedes pegar aquí el calendario del año de una vez."
         },
         "odooTimesheet.diagnosticsDays": {
           "type": "number",

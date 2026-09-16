@@ -2,7 +2,7 @@
 
 Extensión de VS Code que convierte tus commits diarios en líneas de horas en Odoo, sin salir del editor.
 
-Un panel en la barra lateral con dos vistas: **tus commits agrupados por día** (leídos del repositorio local) y **tus tareas de Odoo**. Seleccionas commits, eliges la tarea, dices cuántas horas te llevó, y se crean las líneas en la hoja de horas.
+Un panel en la barra lateral con tres vistas: **tus commits agrupados por día** (leídos del repositorio local), **tus tareas de Odoo** y **las horas que ya llevas imputadas este mes**. Seleccionas commits, eliges la tarea, dices cuántas horas te llevó, y se crean las líneas en la hoja de horas.
 
 ## Requisitos
 
@@ -103,6 +103,28 @@ La descripción se propone con el **mensaje completo** de cada commit —título
 
 > Cuidado con una consecuencia: si eliges **una fecha única** para commits de varios días, el modo agrupado crea **una sola línea** con todo — dos líneas con la misma fecha y la misma tarea no aportarían nada. Con **la fecha del commit** sí se crea una línea por día.
 
+## Horas del mes
+
+La tercera vista es de **solo lectura**: enseña lo que ya tienes imputado en Odoo este mes, para no tener que abrirlo solo para comprobarlo. Un día por fila, con su total, y en la cabecera el acumulado del mes frente a la meta (`Septiembre · 84.5 / 96 h`).
+
+Aparecen **todos los días laborables ya transcurridos, incluidos los que están a cero** — son justo los que hay que ver. Los días por debajo de `odooTimesheet.hoursDailyTarget` se marcan con un aviso, y el tooltip dice cuánto falta.
+
+La semana laboral por defecto es de **lunes a sábado** (`odooTimesheet.hoursWorkdays`). Los días que no son laborables no reclaman horas y solo aparecen si tienes alguna imputada: con el valor por defecto, eso deja **el domingo fuera automáticamente**, sin marcarlo como nada. Para una semana de lunes a viernes, pon `[1, 2, 3, 4, 5]`.
+
+### Festivos
+
+El botón 📅 sobre un día lo marca como **festivo**: deja de contar para la meta, sale de las horas esperadas del mes y se queda en la lista en un color apagado, para que veas por qué ese día no te reclama nada. El mismo botón, ahora una ✕, lo desmarca.
+
+Se guardan en `odooTimesheet.hoursHolidays` como una lista de fechas `AAAA-MM-DD`, así que puedes pegar el calendario del año entero de una vez en vez de ir día a día. Si tienes activada la sincronización de VS Code, viajan contigo.
+
+> Solo se pueden marcar desde la vista los días **ya transcurridos**, que son los que se listan. Para uno futuro, usa **`Odoo: Marcar como festivo`** desde la paleta: te pregunta la fecha.
+
+Trabajar un festivo no es un problema: las horas que imputes ese día suman al total del mes igual que cualquier otro, simplemente no se te exige una meta.
+
+> Con `hoursDailyTarget` a `0` desaparecen las marcas **y los días vacíos**, y la vista se queda en la lista de días que sí tienen horas.
+
+Cuenta **todas tus horas del mes**, no solo las que creaste desde aquí, porque sale de tus líneas en Odoo. Se actualiza sola al registrar horas; el botón de refrescar es para cuando has imputado desde otro sitio. Cambiar la meta en los ajustes recalcula al instante, sin volver a consultar a Odoo.
+
 ## Autenticación
 
 La contraseña o API key se guarda en el **SecretStorage** de VS Code (en Windows, el Administrador de credenciales), nunca en `settings.json`.
@@ -138,6 +160,9 @@ Bloque completo listo para pegar:
   "odooTimesheet.includeMerges": false,
   "odooTimesheet.taskScope": "assigned",
   "odooTimesheet.taskLimit": 50,
+  "odooTimesheet.hoursDailyTarget": 8,        // 0 = sin meta
+  "odooTimesheet.hoursWorkdays": [1, 2, 3, 4, 5, 6],   // 0 = domingo, 6 = sábado
+  "odooTimesheet.hoursHolidays": ["2026-09-15"],       // festivos, AAAA-MM-DD
   "odooTimesheet.projectId": 0,        // 0 = todos los proyectos
   "odooTimesheet.projectName": "",     // solo informativo
   "odooTimesheet.allowInsecureTLS": false
@@ -168,6 +193,9 @@ Bloque completo listo para pegar:
 | `odooTimesheet.taskLimit` | `50` | Máximo de tareas en las **búsquedas** |
 | `odooTimesheet.taskNameDateFormat` | `MM/DD` | Prefijo de fecha al crear tareas |
 | `odooTimesheet.assignNewTasksToMe` | `true` | Autoasignarte las tareas que crea la extensión |
+| `odooTimesheet.hoursDailyTarget` | `8` | Meta de horas por día laborable (`0` la desactiva) |
+| `odooTimesheet.hoursWorkdays` | `[1,2,3,4,5,6]` | Días laborables para la meta (`0` = domingo, `6` = sábado) |
+| `odooTimesheet.hoursHolidays` | `[]` | Festivos `AAAA-MM-DD`; no cuentan para la meta |
 | `odooTimesheet.diagnosticsDays` | `60` | Ventana que revisa el diagnóstico |
 | `odooTimesheet.projectId` | `0` | Proyecto fijado en el panel (`0` = todos) |
 | `odooTimesheet.projectName` | — | Nombre del proyecto fijado, solo informativo |

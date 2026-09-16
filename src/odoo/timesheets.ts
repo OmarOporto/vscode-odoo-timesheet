@@ -1,3 +1,4 @@
+import type { TimesheetRow } from '../hours';
 import { OdooError, type OdooClient } from './client';
 
 export interface TimesheetLineInput {
@@ -60,4 +61,47 @@ export async function createTimesheetLines(
     employee_id: employeeId,
   }));
   return client.create('account.analytic.line', values);
+}
+
+/** Los campos mínimos: la vista solo muestra totales, no líneas sueltas. */
+export const HOURS_FIELDS = ['date', 'unit_amount'];
+
+/**
+ * Dominio de «mis horas en este rango».
+ *
+ * - `project_id != false` es como el propio hr_timesheet define «esto es una
+ *   hoja de horas»: `account.analytic.line` es la tabla analítica general y
+ *   guarda también apuntes de facturas, compras y gastos, que inflarían el
+ *   total en silencio.
+ * - **No** se filtra `task_id != false`, a diferencia del diagnóstico: imputar
+ *   al proyecto sin tarea es legítimo y frecuente, y esas horas cuentan.
+ * - `user_id` y no `employee_id`: es un related almacenado de
+ *   `employee_id.user_id`, así que la vista funciona aunque el usuario no tenga
+ *   ficha de empleado. Es una asimetría deliberada con el camino de escritura,
+ *   que sí la exige (ver `resolveEmployeeId`): leer tus horas no debería
+ *   requerir lo que hace falta para crearlas.
+ */
+export function hoursDomain(userId: number, from: string, to: string): unknown[] {
+  return [
+    ['user_id', '=', userId],
+    ['project_id', '!=', false],
+    ['date', '>=', from],
+    ['date', '<=', to],
+  ];
+}
+
+export async function fetchTimesheetLines(
+  client: OdooClient,
+  from: string,
+  to: string,
+  limit: number,
+): Promise<TimesheetRow[]> {
+  return client.searchRead<TimesheetRow>(
+    'account.analytic.line',
+    hoursDomain(client.userId, from, to),
+    HOURS_FIELDS,
+    // Un solo término de orden a propósito: el servidor simulado de los tests
+    // parte el `order` por espacios y `'date desc, id asc'` lo dejaría mudo.
+    { order: 'date asc', limit },
+  );
 }

@@ -46,6 +46,12 @@ const {
   createTimesheetLines,
   diagnoseMissingTasks,
   formatTaskDate,
+  fetchTimesheetLines,
+  summarizeMonth,
+  monthOf,
+  monthRange,
+  eachDay,
+  weekdayOf,
   CommitRegistry,
   pruneRegistry,
   REGISTRY_KEY,
@@ -106,6 +112,168 @@ assert.equal(formatTaskDate('2026-08-26', 'MM/DD'), '08/26');
 assert.equal(formatTaskDate('2026-08-26', 'DD/MM'), '26/08');
 assert.equal(formatTaskDate('2026-08-26', 'YYYY-MM-DD'), '2026-08-26');
 assert.equal(formatTaskDate('2026-08-26', ''), '', 'sin formato, sin prefijo');
+
+// --- Aritmética de meses, siempre en hora local ------------------------------
+assert.equal(monthOf('2026-09-16'), '2026-09');
+assert.deepEqual(monthRange('2026-02'), { from: '2026-02-01', to: '2026-02-28' });
+assert.deepEqual(monthRange('2024-02'), { from: '2024-02-01', to: '2024-02-29' }, 'bisiesto');
+assert.deepEqual(monthRange('2026-12'), { from: '2026-12-01', to: '2026-12-31' });
+assert.equal(eachDay('2026-02-26', '2026-03-02').length, 5, 'el rango cruza el fin de mes');
+assert.deepEqual(eachDay('2025-12-30', '2026-01-02'), [
+  '2025-12-30',
+  '2025-12-31',
+  '2026-01-01',
+  '2026-01-02',
+]);
+assert.equal(eachDay('2026-09-16', '2026-09-16').length, 1, 'ambos extremos inclusive');
+assert.equal(weekdayOf('2020-03-01'), 0, 'domingo');
+assert.equal(weekdayOf('2020-03-02'), 1, 'lunes');
+
+// --- Resumen mensual de horas ------------------------------------------------
+// Marzo de 2020 empieza en domingo: 22 laborables en el mes, 7 hasta el día 10
+// (martes). Fechas fijas para que el test no dependa de cuándo se ejecute.
+const MARCH = { dailyTarget: 8, workdays: [1, 2, 3, 4, 5], holidays: [], limit: 500 };
+const march = summarizeMonth(
+  [
+    { date: '2020-03-02', unit_amount: 4 },
+    { date: '2020-03-02', unit_amount: 4 },
+    { date: '2020-03-03', unit_amount: 6 },
+    { date: '2020-03-07', unit_amount: 3 },
+  ],
+  '2020-03-10',
+  MARCH,
+);
+const marchDay = (day) => march.days.find((entry) => entry.day === day);
+
+assert.equal(march.month, '2020-03');
+assert.equal(march.hours, 17, 'total del mes: 8 + 6 + 3');
+assert.equal(march.lineCount, 4);
+assert.equal(march.expected, 56, '7 laborables transcurridos × 8 h');
+assert.equal(march.expectedFullMonth, 176, '22 laborables en marzo de 2020 × 8 h');
+assert.equal(march.deficit, 39, '56 esperadas menos 17 imputadas');
+assert.equal(march.truncated, false);
+
+assert.equal(marchDay('2020-03-02').hours, 8, 'dos líneas del mismo día se suman');
+assert.equal(marchDay('2020-03-02').lines, 2);
+assert.equal(marchDay('2020-03-02').deficit, 0, 'llega a la meta');
+assert.equal(marchDay('2020-03-03').deficit, 2, 'laborable por debajo de la meta');
+assert.equal(marchDay('2020-03-04').hours, 0, 'un laborable sin líneas aparece a cero');
+assert.equal(marchDay('2020-03-04').deficit, 8, '…y es todo déficit: es lo que hay que ver');
+assert.equal(marchDay('2020-03-07').hours, 3, 'un sábado con horas sí aparece');
+assert.equal(marchDay('2020-03-07').deficit, 0, '…pero no se le exige meta');
+assert.equal(marchDay('2020-03-01'), undefined, 'un domingo sin horas no aparece');
+assert.equal(marchDay('2020-03-11'), undefined, 'los días futuros no aparecen');
+assert.deepEqual(
+  march.days.map((entry) => entry.day),
+  ['2020-03-10', '2020-03-09', '2020-03-07', '2020-03-06', '2020-03-05', '2020-03-04', '2020-03-03', '2020-03-02'],
+  'orden descendente: hoy arriba',
+);
+
+// El redondeo se aplica una sola vez, al final: sumar floats por el camino
+// daría 0.6000000000000001, que el déficit y el tooltip enseñarían.
+assert.equal(
+  summarizeMonth(
+    [
+      { date: '2020-03-02', unit_amount: 0.1 },
+      { date: '2020-03-02', unit_amount: 0.2 },
+      { date: '2020-03-02', unit_amount: 0.3 },
+    ],
+    '2020-03-10',
+    MARCH,
+  ).hours,
+  0.6,
+  'sin ruido de coma flotante',
+);
+
+assert.equal(
+  summarizeMonth([{ date: '2020-03-02' }], '2020-03-10', MARCH).hours,
+  0,
+  'unit_amount ausente cuenta como 0, no NaN',
+);
+assert.equal(
+  summarizeMonth([{ date: '2020-02-28', unit_amount: 9 }], '2020-03-10', MARCH).hours,
+  0,
+  'una línea de otro mes se descarta',
+);
+
+// Imputar por adelantado es raro pero legal: el día tiene que aparecer, o el
+// total del mes no cuadraría con la lista.
+const ahead = summarizeMonth([{ date: '2020-03-25', unit_amount: 5 }], '2020-03-10', MARCH);
+assert.equal(ahead.hours, 5);
+assert.equal(ahead.days[0].day, '2020-03-25', 'el día futuro con horas encabeza la lista');
+assert.equal(ahead.days[0].deficit, 0, 'un día que no ha llegado no tiene déficit');
+
+const noTarget = summarizeMonth([{ date: '2020-03-03', unit_amount: 6 }], '2020-03-10', {
+  ...MARCH,
+  dailyTarget: 0,
+});
+assert.equal(noTarget.expected, 0, 'sin meta no hay nada que esperar');
+assert.ok(
+  noTarget.days.every((entry) => entry.deficit === 0),
+  'dailyTarget 0 desactiva todas las marcas',
+);
+assert.deepEqual(
+  noTarget.days.map((entry) => entry.day),
+  ['2020-03-03'],
+  'sin meta, un día vacío es ruido: solo salen los que tienen horas',
+);
+
+const emptyMonth = summarizeMonth([], '2020-03-10', MARCH);
+assert.equal(emptyMonth.hours, 0);
+assert.equal(emptyMonth.days.length, 7, 'sin líneas siguen saliendo los laborables transcurridos');
+
+assert.equal(
+  summarizeMonth([{ date: '2020-03-02', unit_amount: 1 }], '2020-03-10', { ...MARCH, limit: 1 })
+    .truncated,
+  true,
+  'alcanzar el tope se avisa, no se calla',
+);
+
+// --- Festivos ----------------------------------------------------------------
+// 2020-03-04 es miércoles: laborable salvo que se marque.
+const holiday = summarizeMonth([], '2020-03-10', { ...MARCH, holidays: ['2020-03-04'] });
+const holidayDay = holiday.days.find((entry) => entry.day === '2020-03-04');
+
+assert.equal(holidayDay.isHoliday, true);
+assert.equal(holidayDay.target, 0, 'un festivo no reclama horas');
+assert.equal(holidayDay.deficit, 0);
+assert.ok(holidayDay, 'un festivo vacío sigue en la lista: si no, no habría cómo desmarcarlo');
+assert.equal(holiday.expected, 48, 'el festivo sale de lo esperado: 6 laborables × 8 h');
+assert.equal(
+  holiday.expectedFullMonth,
+  168,
+  'y también del mes entero: 21 laborables × 8 h en vez de 22',
+);
+
+// Un festivo en el que sí trabajaste: las horas cuentan, la meta no.
+const workedHoliday = summarizeMonth([{ date: '2020-03-04', unit_amount: 5 }], '2020-03-10', {
+  ...MARCH,
+  holidays: ['2020-03-04'],
+});
+assert.equal(workedHoliday.hours, 5, 'las horas de un festivo suman al total');
+assert.equal(workedHoliday.expected, 48, 'pero no cambian lo esperado');
+
+assert.equal(
+  summarizeMonth([], '2020-03-10', { ...MARCH, holidays: ['2020-03-25'] }).days.some(
+    (entry) => entry.day === '2020-03-25',
+  ),
+  false,
+  'un festivo que aún no ha llegado no ocupa sitio',
+);
+
+// Semana de lunes a sábado: el domingo es el único día que no reclama horas.
+const monToSat = summarizeMonth([], '2020-03-10', { ...MARCH, workdays: [1, 2, 3, 4, 5, 6] });
+assert.equal(
+  monToSat.days.some((entry) => entry.day === '2020-03-07'),
+  true,
+  'el sábado pasa a ser laborable y aparece aunque esté vacío',
+);
+assert.equal(
+  monToSat.days.some((entry) => entry.day === '2020-03-08'),
+  false,
+  'el domingo sigue fuera, como un festivo',
+);
+assert.equal(monToSat.expected, 64, '8 laborables transcurridos × 8 h');
 
 // ---------------------------------------------------------------------------
 // Registro de commits ya imputados
@@ -339,6 +507,27 @@ async function sharedAssertions(client, label) {
     `${label}: un id suelto se normaliza a lista`,
   );
   setScenario('ok');
+
+  // --- Lectura de horas del mes --------------------------------------------
+  const rows = await fetchTimesheetLines(client, '2020-03-01', '2020-03-31', 500);
+  assert.deepEqual(
+    lastCall().params.domain,
+    [
+      ['user_id', '=', UID],
+      ['project_id', '!=', false],
+      ['date', '>=', '2020-03-01'],
+      ['date', '<=', '2020-03-31'],
+    ],
+    `${label}: dominio de mis horas del mes`,
+  );
+  assert.deepEqual(lastCall().params.fields, ['date', 'unit_amount'], `${label}: solo lo que se pinta`);
+  assert.equal(lastCall().params.order, 'date asc', label);
+  assert.equal(
+    rows.reduce((sum, row) => sum + row.unit_amount, 0),
+    12.5,
+    `${label}: suma las mías y solo las mías`,
+  );
+  assert.equal(rows.length, 3, `${label}: fuera la de otro usuario y la analítica sin proyecto`);
 
   return schema;
 }

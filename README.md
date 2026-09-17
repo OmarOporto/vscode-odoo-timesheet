@@ -105,9 +105,33 @@ La descripción se propone con el **mensaje completo** de cada commit —título
 
 ## Horas del mes
 
-La tercera vista es de **solo lectura**: enseña lo que ya tienes imputado en Odoo este mes, para no tener que abrirlo solo para comprobarlo. Un día por fila, con su total, y en la cabecera el acumulado del mes frente a la meta (`Septiembre · 84.5 / 96 h`).
+La tercera vista es de **solo lectura**: enseña lo que ya tienes imputado en Odoo este mes, para no tener que abrirlo solo para comprobarlo.
 
-Aparecen **todos los días laborables ya transcurridos, incluidos los que están a cero** — son justo los que hay que ver. Los días por debajo de `odooTimesheet.hoursDailyTarget` se marcan con un aviso, y el tooltip dice cuánto falta.
+```
+ Mes  ███░░░░░░░   53.5 / 176 h · faltan 122.5
+ Hoy  ████████░░   6 / 8 h · faltan 2
+▾ Días                                  5 de 14
+     Hoy            6 h    ⚠
+     Ayer           8.5 h
+     lun 14 sep     7 h    ⚠
+     sáb 12 sep     8 h
+     vie 11 sep     8 h
+     Mostrar más…
+```
+
+Arriba, **dos barras**: cuánto llevas del mes y cuánto de hoy. Debajo, los días, de cinco en cinco (`odooTimesheet.hoursDaysShown`). **Plegar «Días» deja solo las dos barras**, que es la vista mínima para saber cómo vas.
+
+Aparecen **todos los días laborables ya transcurridos, incluidos los que están a cero** — son justo los que hay que ver. Los días por debajo de la meta se marcan con un aviso, y el tooltip dice cuánto falta.
+
+### Las metas
+
+El botón ✎ sobre la barra **Mes** te deja escribir cuántas horas quieres cubrir este mes. Vacío vuelve al cálculo automático: días laborables × meta diaria.
+
+El mismo botón sobre un **día** —o sobre la barra de hoy— fija una meta solo para esa fecha. «El viernes solo trabajo 4 h» sin tocar el resto de la semana. Vaciarlo devuelve el día a la meta general.
+
+Las dos metas son **independientes**: la del mes no reparte el déficit entre los días que quedan, así que la meta de hoy no cambia porque ayer fueras corto.
+
+> Una meta de día manda sobre todo lo demás, incluidos los festivos y los días no laborables. Si le pones 4 h a un domingo es porque ese domingo trabajas, y pasa a aparecer en la lista y a exigirte horas.
 
 La semana laboral por defecto es de **lunes a sábado** (`odooTimesheet.hoursWorkdays`). Los días que no son laborables no reclaman horas y solo aparecen si tienes alguna imputada: con el valor por defecto, eso deja **el domingo fuera automáticamente**, sin marcarlo como nada. Para una semana de lunes a viernes, pon `[1, 2, 3, 4, 5]`.
 
@@ -163,6 +187,9 @@ Bloque completo listo para pegar:
   "odooTimesheet.hoursDailyTarget": 8,        // 0 = sin meta
   "odooTimesheet.hoursWorkdays": [1, 2, 3, 4, 5, 6],   // 0 = domingo, 6 = sábado
   "odooTimesheet.hoursHolidays": ["2026-09-15"],       // festivos, AAAA-MM-DD
+  "odooTimesheet.hoursMonthlyTarget": 0,               // 0 = calculada
+  "odooTimesheet.hoursDayTargets": { "2026-09-18": 4 },  // metas de dias sueltos
+  "odooTimesheet.hoursDaysShown": 5,
   "odooTimesheet.projectId": 0,        // 0 = todos los proyectos
   "odooTimesheet.projectName": "",     // solo informativo
   "odooTimesheet.allowInsecureTLS": false
@@ -195,6 +222,9 @@ Bloque completo listo para pegar:
 | `odooTimesheet.assignNewTasksToMe` | `true` | Autoasignarte las tareas que crea la extensión |
 | `odooTimesheet.hoursDailyTarget` | `8` | Meta de horas por día laborable (`0` la desactiva) |
 | `odooTimesheet.hoursWorkdays` | `[1,2,3,4,5,6]` | Días laborables para la meta (`0` = domingo, `6` = sábado) |
+| `odooTimesheet.hoursMonthlyTarget` | `0` | Meta del mes (`0` la calcula desde la diaria) |
+| `odooTimesheet.hoursDayTargets` | `{}` | Metas para días sueltos: `{"2026-09-18": 4}` |
+| `odooTimesheet.hoursDaysShown` | `5` | Días visibles antes de «Mostrar más» |
 | `odooTimesheet.hoursHolidays` | `[]` | Festivos `AAAA-MM-DD`; no cuentan para la meta |
 | `odooTimesheet.diagnosticsDays` | `60` | Ventana que revisa el diagnóstico |
 | `odooTimesheet.projectId` | `0` | Proyecto fijado en el panel (`0` = todos) |

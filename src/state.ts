@@ -81,6 +81,39 @@ export async function toggleHoliday(day: string): Promise<boolean> {
   return isHoliday;
 }
 
+/**
+ * Metas para días sueltos. Mismo filtrado defensivo que `readHolidays`: se
+ * edita a mano y una fecha o un número mal escritos no deben descuadrar el mes
+ * en silencio.
+ */
+export function readDayTargets(): Record<string, number> {
+  const raw = vscode.workspace
+    .getConfiguration('odooTimesheet')
+    .get<Record<string, unknown>>('hoursDayTargets', {});
+  const targets: Record<string, number> = {};
+  for (const [key, value] of Object.entries(raw ?? {})) {
+    const day = parseIsoDay(String(key));
+    const hours = Number(value);
+    if (day && Number.isFinite(hours) && hours >= 0 && hours <= 24) {
+      targets[day] = hours;
+    }
+  }
+  return targets;
+}
+
+/** `undefined` borra la excepción y devuelve el día a la meta general. */
+export async function writeDayTarget(day: string, hours: number | undefined): Promise<void> {
+  const targets = readDayTargets();
+  if (hours === undefined) {
+    delete targets[day];
+  } else {
+    targets[day] = hours;
+  }
+  // Ordenado por fecha: esto se acaba leyendo a mano en settings.json.
+  const sorted = Object.fromEntries(Object.entries(targets).sort(([a], [b]) => a.localeCompare(b)));
+  await vscode.workspace.getConfiguration('odooTimesheet').update('hoursDayTargets', sorted, GLOBAL);
+}
+
 export class OdooSession implements vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<void>();
   readonly onDidChange = this.emitter.event;

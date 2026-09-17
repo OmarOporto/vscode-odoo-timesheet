@@ -109,26 +109,41 @@ export function formatDayLabel(day: string): string {
 }
 
 /**
- * Acepta `2.5`, `2,5` y `2:30`. Devuelve `undefined` si no es una cantidad de
- * horas plausible, que es lo que `validateInput` usa para bloquear el InputBox.
+ * Convierte el texto a horas decimales, sin juzgar el rango. Acepta `2.5`,
+ * `2,5` y `2:30`. `undefined` si no es un número de horas.
  */
-export function parseHours(input: string): number | undefined {
+function readHours(input: string): number | undefined {
   const text = input.trim().replace(',', '.');
   if (!text) {
     return undefined;
   }
 
-  const hoursMinutes = /^(\d{1,2}):([0-5]?\d)$/.exec(text);
+  const hoursMinutes = /^(\d{1,3}):([0-5]?\d)$/.exec(text);
   if (hoursMinutes) {
-    const value = Number(hoursMinutes[1]) + Number(hoursMinutes[2]) / 60;
-    return value > 0 && value <= 24 ? round2(value) : undefined;
+    return round2(Number(hoursMinutes[1]) + Number(hoursMinutes[2]) / 60);
   }
 
   const value = Number(text);
-  if (!Number.isFinite(value) || value <= 0 || value > 24) {
-    return undefined;
-  }
-  return round2(value);
+  return Number.isFinite(value) ? round2(value) : undefined;
+}
+
+/**
+ * Horas de una imputación: `2.5`, `2,5` o `2:30`. Devuelve `undefined` si no es
+ * una cantidad plausible, que es lo que `validateInput` usa para bloquear el
+ * InputBox. Cero no vale: una línea de cero horas no tiene sentido.
+ */
+export function parseHours(input: string): number | undefined {
+  const value = readHours(input);
+  return value !== undefined && value > 0 && value <= 24 ? value : undefined;
+}
+
+/**
+ * Horas de una meta. A diferencia de `parseHours` admite **cero**, que es como
+ * se borra una meta, y llega hasta `max`, porque una meta mensual pasa de 24.
+ */
+export function parseTarget(input: string, max: number): number | undefined {
+  const value = readHours(input);
+  return value !== undefined && value >= 0 && value <= max ? value : undefined;
 }
 
 /** Redondeo a céntimos de hora. Lo comparten `parseHours` y el resumen mensual. */

@@ -48,6 +48,9 @@ const {
   formatTaskDate,
   fetchTimesheetLines,
   summarizeMonth,
+  progressBar,
+  parseHours,
+  parseTarget,
   monthOf,
   monthRange,
   eachDay,
@@ -132,7 +135,14 @@ assert.equal(weekdayOf('2020-03-02'), 1, 'lunes');
 // --- Resumen mensual de horas ------------------------------------------------
 // Marzo de 2020 empieza en domingo: 22 laborables en el mes, 7 hasta el día 10
 // (martes). Fechas fijas para que el test no dependa de cuándo se ejecute.
-const MARCH = { dailyTarget: 8, workdays: [1, 2, 3, 4, 5], holidays: [], limit: 500 };
+const MARCH = {
+  dailyTarget: 8,
+  workdays: [1, 2, 3, 4, 5],
+  holidays: [],
+  dayTargets: {},
+  monthlyTarget: 0,
+  limit: 500,
+};
 const march = summarizeMonth(
   [
     { date: '2020-03-02', unit_amount: 4 },
@@ -274,6 +284,101 @@ assert.equal(
   'el domingo sigue fuera, como un festivo',
 );
 assert.equal(monToSat.expected, 64, '8 laborables transcurridos × 8 h');
+
+// --- Barra de progreso -------------------------------------------------------
+assert.equal(progressBar(0, 8, 10), '░░░░░░░░░░');
+assert.equal(progressBar(8, 8, 10), '██████████', 'meta cumplida, barra llena');
+assert.equal(progressBar(4, 8, 10), '█████░░░░░');
+assert.equal(progressBar(0, 0, 10), '', 'sin meta no hay nada que medir');
+assert.equal(progressBar(5, 0, 10), '', 'tampoco con horas hechas');
+assert.equal(
+  progressBar(0.3, 8, 10),
+  '█░░░░░░░░░',
+  'algo hecho nunca se ve como cero: el redondeo daria 0 bloques',
+);
+assert.equal(
+  progressBar(7.99, 8, 10),
+  '█████████░',
+  'no se llena del todo hasta cumplir la meta de verdad',
+);
+assert.equal(progressBar(20, 8, 10), '██████████', 'pasarse no desborda');
+assert.equal(progressBar(20, 8, 10).length, 10, 'el ancho es exacto');
+assert.equal(progressBar(3, 8, 20).length, 20, 'el ancho es configurable');
+
+// --- Parseo de horas y de metas ----------------------------------------------
+assert.equal(parseHours('2:30'), 2.5);
+assert.equal(parseHours('2,5'), 2.5);
+assert.equal(parseHours('0'), undefined, 'una imputacion de cero horas no existe');
+assert.equal(parseHours('30'), undefined, 'mas de 24 h en un dia, no');
+
+assert.equal(parseTarget('0', 24), 0, 'cero si vale como meta: es como se borra');
+assert.equal(parseTarget('176', 400), 176, 'una meta mensual pasa de 24');
+assert.equal(parseTarget('7:30', 24), 7.5, 'tambien admite el formato con dos puntos');
+assert.equal(parseTarget('401', 400), undefined, 'por encima del maximo, no');
+assert.equal(parseTarget('-1', 400), undefined, 'negativas tampoco');
+assert.equal(parseTarget('  ', 400), undefined);
+
+// --- Metas por dia y meta mensual --------------------------------------------
+const custom = summarizeMonth([], '2020-03-10', {
+  ...MARCH,
+  dayTargets: { '2020-03-04': 4 },
+});
+const customDay = (day) => custom.days.find((entry) => entry.day === day);
+
+assert.equal(customDay('2020-03-04').target, 4, 'la excepcion manda sobre la meta diaria');
+assert.equal(customDay('2020-03-04').hasOwnTarget, true);
+assert.equal(customDay('2020-03-03').target, 8, 'y no toca a los demas dias');
+assert.equal(customDay('2020-03-03').hasOwnTarget, false);
+assert.equal(custom.expected, 52, '6 dias × 8 h mas uno de 4 h');
+assert.equal(custom.expectedFullMonth, 172, '176 menos las 4 h que se rebajaron');
+
+// Una excepcion gana sobre el fin de semana y sobre el festivo: si le pones meta
+// a un domingo es porque ese domingo trabajas.
+const sunday = summarizeMonth([], '2020-03-10', {
+  ...MARCH,
+  holidays: ['2020-03-05'],
+  dayTargets: { '2020-03-08': 6, '2020-03-05': 3 },
+});
+assert.equal(
+  sunday.days.find((entry) => entry.day === '2020-03-08').target,
+  6,
+  'un domingo con meta propia pasa a ser exigible',
+);
+assert.equal(
+  sunday.days.find((entry) => entry.day === '2020-03-05').target,
+  3,
+  'y una meta propia rescata un festivo',
+);
+
+assert.equal(
+  summarizeMonth([], '2020-03-10', { ...MARCH, dayTargets: { '2020-03-04': 0 } }).days.some(
+    (entry) => entry.day === '2020-03-04',
+  ),
+  true,
+  'un dia con meta propia de cero sigue en la lista: si no, no habria como quitarla',
+);
+
+assert.equal(
+  summarizeMonth([], '2020-03-10', { ...MARCH, monthlyTarget: 160 }).monthTarget,
+  160,
+  'la meta mensual escrita a mano manda',
+);
+assert.equal(march.monthTarget, 176, 'y con 0 se cae a la calculada');
+
+// --- El dia de hoy, este o no en la lista ------------------------------------
+assert.equal(march.today.day, '2020-03-10');
+assert.equal(march.today.target, 8);
+assert.equal(march.today.hours, 0, 'hoy sin horas');
+
+// 2020-03-08 es domingo: no sale en la lista, pero la barra de hoy lo necesita.
+const onSunday = summarizeMonth([], '2020-03-08', MARCH);
+assert.equal(onSunday.today.day, '2020-03-08');
+assert.equal(onSunday.today.target, 0, 'un domingo no reclama horas');
+assert.equal(
+  onSunday.days.some((entry) => entry.day === '2020-03-08'),
+  false,
+  'y por eso no esta en days: la barra de hoy no puede salir de ahi',
+);
 
 // ---------------------------------------------------------------------------
 // Registro de commits ya imputados

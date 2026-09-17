@@ -21,8 +21,17 @@ export {
   hoursDomain,
 } from '../../src/odoo/timesheets';
 export { diagnoseMissingTasks } from '../../src/odoo/diagnostics';
-export { formatTaskDate, daysAgo, monthOf, monthRange, eachDay, weekdayOf } from '../../src/util';
+export {
+  formatTaskDate,
+  daysAgo,
+  monthOf,
+  monthRange,
+  eachDay,
+  weekdayOf,
+  parseHours,
+  parseTarget,
+} from '../../src/util';
 // hours.ts tampoco importa `vscode`: la agregación se prueba sin servidor.
-export { summarizeMonth } from '../../src/hours';
+export { summarizeMonth, progressBar } from '../../src/hours';
 // registry.ts no importa `vscode`: se puede empaquetar sin stub.
 export { CommitRegistry, pruneRegistry, REGISTRY_KEY } from '../../src/registry';

@@ -157,6 +157,23 @@
         "icon": "$(close)"
       },
       {
+        "command": "odooTimesheet.setMonthlyTarget",
+        "title": "Fijar la meta del mes",
+        "category": "Odoo",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "odooTimesheet.setDayTarget",
+        "title": "Fijar la meta de un día",
+        "category": "Odoo",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "odooTimesheet.showMoreHours",
+        "title": "Mostrar más días",
+        "category": "Odoo"
+      },
+      {
         "command": "odooTimesheet.searchTasks",
         "title": "Buscar tareas",
         "category": "Odoo",
@@ -317,14 +334,29 @@
           "group": "1_odoo@1"
         },
         {
+          "command": "odooTimesheet.setMonthlyTarget",
+          "when": "view == odooTimesheet.hours && viewItem == hoursMonthBar",
+          "group": "inline@1"
+        },
+        {
+          "command": "odooTimesheet.setDayTarget",
+          "when": "view == odooTimesheet.hours && viewItem == hoursTodayBar",
+          "group": "inline@1"
+        },
+        {
+          "command": "odooTimesheet.setDayTarget",
+          "when": "view == odooTimesheet.hours && viewItem =~ /^hoursDay/",
+          "group": "inline@1"
+        },
+        {
           "command": "odooTimesheet.markHoliday",
           "when": "view == odooTimesheet.hours && viewItem == hoursDay",
-          "group": "inline@1"
+          "group": "inline@2"
         },
         {
           "command": "odooTimesheet.unmarkHoliday",
           "when": "view == odooTimesheet.hours && viewItem == hoursDayHoliday",
-          "group": "inline@1"
+          "group": "inline@2"
         },
         {
           "command": "odooTimesheet.copyCommitHash",
@@ -344,6 +376,10 @@
         },
         {
           "command": "odooTimesheet.unmarkHoliday",
+          "when": "false"
+        },
+        {
+          "command": "odooTimesheet.showMoreHours",
           "when": "false"
         },
         {
@@ -540,6 +576,30 @@
             6
           ],
           "markdownDescription": "Qué días de la semana cuentan como laborables para la meta. `0` es domingo y `6` sábado; por defecto, de lunes a sábado. Los días no laborables no reclaman horas y solo aparecen en la vista si tienen alguna.\n\nPara una semana de lunes a viernes: `[1, 2, 3, 4, 5]`."
+        },
+        "odooTimesheet.hoursMonthlyTarget": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 400,
+          "markdownDescription": "Horas objetivo del mes, para la barra de progreso. `0` la calcula a partir de la meta diaria y los días laborables.\n\nSe edita con el botón ✎ sobre la barra «Mes» en la vista «Horas del mes»."
+        },
+        "odooTimesheet.hoursDayTargets": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 24
+          },
+          "default": {},
+          "markdownDescription": "Metas distintas para días sueltos: `{ \"2026-09-18\": 4 }`. Mandan sobre la meta diaria, sobre los festivos y sobre los días no laborables.\n\nSe editan con el botón ✎ sobre un día en la vista «Horas del mes»."
+        },
+        "odooTimesheet.hoursDaysShown": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 31,
+          "description": "Cuántos días mostrar en la vista de horas antes del nodo «Mostrar más»."
         },
         "odooTimesheet.hoursHolidays": {
           "type": "array",

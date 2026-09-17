@@ -23,6 +23,8 @@ export interface DaySummary {
   isWorkday: boolean;
   /** Marcado a mano como festivo. Los no laborables no cuentan como tal. */
   isHoliday: boolean;
+  /** Tiene una meta propia escrita a mano, distinta de la general. */
+  hasOwnTarget: boolean;
   /** Meta del día. `0` cuando no aplica: festivo, no laborable o meta desactivada. */
   target: number;
   deficit: number;
@@ -33,11 +35,18 @@ export interface MonthSummary {
   month: string;
   /** Del más reciente al más antiguo. */
   days: DaySummary[];
+  /**
+   * El día de hoy, esté o no en `days`: un domingo sin horas o una meta diaria
+   * de cero lo dejan fuera de la lista, pero la barra de hoy lo necesita igual.
+   */
+  today: DaySummary;
   hours: number;
-  /** Laborables transcurridos × meta diaria. */
+  /** Suma de las metas de los días transcurridos. */
   expected: number;
-  /** El mes entero, para el tooltip. */
+  /** Suma de las metas del mes entero. */
   expectedFullMonth: number;
+  /** Contra qué se mide la barra del mes: la meta escrita a mano, o la calculada. */
+  monthTarget: number;
   deficit: number;
   lineCount: number;
   /** Se alcanzó el tope de líneas: el total puede estar incompleto. */
@@ -51,8 +60,41 @@ export interface HoursOptions {
   workdays: number[];
   /** Festivos marcados a mano, `YYYY-MM-DD`. No se les exige meta. */
   holidays: string[];
+  /**
+   * Metas para días sueltos, `YYYY-MM-DD` → horas. Mandan sobre todo lo demás,
+   * incluidos festivos y no laborables: si le pones meta a un domingo es porque
+   * ese domingo trabajas.
+   */
+  dayTargets: Record<string, number>;
+  /** Meta del mes escrita a mano. `0` = la calculada a partir de la diaria. */
+  monthlyTarget: number;
   /** El `limit` que se pasó a Odoo, para poder detectar el truncamiento. */
   limit: number;
+}
+
+/** Ancho por defecto de las barras. Suficiente para leerlas en un panel estrecho. */
+const BAR_WIDTH = 10;
+
+/**
+ * Barra de progreso con bloques. Sin meta no hay nada que medir, así que
+ * `target <= 0` devuelve cadena vacía y quien llama decide qué poner en su sitio.
+ */
+export function progressBar(done: number, target: number, width = BAR_WIDTH): string {
+  if (target <= 0) {
+    return '';
+  }
+  const ratio = Math.min(1, Math.max(0, done / target));
+  let filled = Math.round(ratio * width);
+  // Con Math.round a secas, media hora de ocho daria cero bloques y la barra
+  // diria «no has hecho nada». Algo hecho siempre se ve.
+  if (filled === 0 && done > 0) {
+    filled = 1;
+  }
+  // Y al reves: no llenarla del todo hasta que la meta este cumplida de verdad.
+  if (filled === width && done < target) {
+    filled = width - 1;
+  }
+  return '█'.repeat(filled) + '░'.repeat(width - filled);
 }
 
 /**
@@ -95,52 +137,67 @@ export function summarizeMonth(
   const isWorkday = (day: string): boolean => options.workdays.includes(weekdayOf(day));
   // Un festivo y un día no laborable se tratan igual: ninguno reclama horas.
   const counts = (day: string): boolean => isWorkday(day) && !holidays.has(day);
-  // Un día que aún no ha llegado tampoco tiene meta: marcarlo como incompleto
-  // sería reprochar trabajo no hecho todavía.
-  const targetOf = (day: string): number =>
-    counts(day) && day <= today ? options.dailyTarget : 0;
+  const hasOwnTarget = (day: string): boolean =>
+    Object.prototype.hasOwnProperty.call(options.dayTargets, day);
 
-  const days: DaySummary[] = [];
-  for (const day of eachDay(from, to)) {
+  /** Lo que el día pide, haya llegado o no. La excepción manda sobre todo. */
+  const plannedTarget = (day: string): number =>
+    hasOwnTarget(day) ? options.dayTargets[day] : counts(day) ? options.dailyTarget : 0;
+
+  // Un día que aún no ha llegado no debe nada: marcarlo como incompleto sería
+  // reprochar trabajo no hecho todavía.
+  const targetOf = (day: string): number => (day <= today ? plannedTarget(day) : 0);
+
+  const summarize = (day: string): DaySummary => {
     const entry = totals.get(day);
     const target = targetOf(day);
-    const isHoliday = holidays.has(day);
-    // Un día vacío solo aporta cuando hay meta que incumplir, o cuando lo
-    // marcaste tú: si un festivo desapareciera, no habría forma de desmarcarlo.
-    if (!entry && target === 0 && !(isHoliday && day <= today)) {
-      continue;
-    }
     const hours = round2(entry?.hours ?? 0);
-    days.push({
+    return {
       day,
       hours,
       lines: entry?.lines ?? 0,
       isWorkday: isWorkday(day),
-      isHoliday,
+      isHoliday: holidays.has(day),
+      hasOwnTarget: hasOwnTarget(day),
       target,
       deficit: round2(Math.max(0, target - hours)),
-    });
+    };
+  };
+
+  const days: DaySummary[] = [];
+  for (const day of eachDay(from, to)) {
+    const summary = summarize(day);
+    // Un día vacío solo aporta cuando hay meta que incumplir, o cuando lo
+    // tocaste tú: si un festivo o una meta propia desaparecieran de la lista,
+    // no habría forma de quitarlos.
+    const marked = (summary.isHoliday || summary.hasOwnTarget) && day <= today;
+    if (summary.lines === 0 && summary.target === 0 && !marked) {
+      continue;
+    }
+    days.push(summary);
   }
   days.reverse();
 
   // El total sale de las filas y no de la suma de los días redondeados: de otro
   // modo el redondeo se aplicaría dos veces y el mes acumularía el error.
   const hours = round2([...totals.values()].reduce((sum, entry) => sum + entry.hours, 0));
-  // Los festivos salen de lo esperado, no solo de las marcas: si no, el mes
+  // Sumar metas en vez de contar días × meta diaria: así las excepciones por día
+  // entran solas, y los festivos siguen saliendo de lo esperado — si no, el mes
   // arrastraría un déficit que nadie puede cubrir.
-  const expected = round2(
-    eachDay(from, today < to ? today : to).filter(counts).length * options.dailyTarget,
-  );
-  const expectedFullMonth = round2(
-    eachDay(from, to).filter(counts).length * options.dailyTarget,
-  );
+  const sumTargets = (until: string): number =>
+    round2(eachDay(from, until).reduce((sum, day) => sum + plannedTarget(day), 0));
+
+  const expected = sumTargets(today < to ? today : to);
+  const expectedFullMonth = sumTargets(to);
 
   return {
     month,
     days,
+    today: summarize(today),
     hours,
     expected,
     expectedFullMonth,
+    monthTarget: options.monthlyTarget > 0 ? options.monthlyTarget : expectedFullMonth,
     deficit: round2(Math.max(0, expected - hours)),
     lineCount,
     truncated: rows.length >= options.limit,

@@ -1,7 +1,14 @@
 import * as vscode from 'vscode';
-import { summarizeMonth, type DaySummary, type MonthSummary, type TimesheetRow } from '../hours';
+import {
+  progressBar,
+  summarizeMonth,
+  type DaySummary,
+  type HoursOptions,
+  type MonthSummary,
+  type TimesheetRow,
+} from '../hours';
 import { fetchTimesheetLines } from '../odoo/timesheets';
-import { readHolidays, type OdooSession } from '../state';
+import { readDayTargets, readHolidays, type OdooSession } from '../state';
 import { dayUri } from './hoursDecorations';
 import {
   currentMonth,
@@ -16,6 +23,32 @@ import {
 /** Tope de líneas por consulta. Un mes de una persona son decenas: es un seguro. */
 const LINE_LIMIT = 500;
 
+/**
+ * Una de las dos barras de progreso. `day` solo lo lleva la de hoy, y es lo que
+ * permite colgarle el botón de editar la meta de ese día.
+ */
+export class HoursBarNode {
+  constructor(
+    readonly kind: 'month' | 'today',
+    readonly done: number,
+    readonly target: number,
+    readonly caption: string,
+    readonly day?: string,
+  ) {}
+}
+
+/** El grupo plegable. Plegarlo deja la vista en las dos barras. */
+export class HoursDaysNode {
+  constructor(
+    readonly shown: number,
+    readonly total: number,
+  ) {}
+}
+
+export class HoursMoreNode {
+  constructor(readonly shown: number) {}
+}
+
 export class HoursDayNode {
   constructor(readonly summary: DaySummary) {}
 }
@@ -27,7 +60,12 @@ export class HoursInfoNode {
   ) {}
 }
 
-export type HoursTreeNode = HoursDayNode | HoursInfoNode;
+export type HoursTreeNode =
+  | HoursBarNode
+  | HoursDaysNode
+  | HoursMoreNode
+  | HoursDayNode
+  | HoursInfoNode;
 
 export class HoursTreeProvider implements vscode.TreeDataProvider<HoursTreeNode>, vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<HoursTreeNode | undefined | void>();
@@ -43,6 +81,8 @@ export class HoursTreeProvider implements vscode.TreeDataProvider<HoursTreeNode>
    * compartir la consulta en vuelo, cada refresco serían dos viajes a Odoo.
    */
   private inFlight: Promise<void> | undefined;
+  /** Días visibles. Solo en memoria, como el `pageSizes` de la vista de tareas. */
+  private pageSize: number | undefined;
 
   constructor(
     private readonly session: OdooSession,
@@ -56,7 +96,10 @@ export class HoursTreeProvider implements vscode.TreeDataProvider<HoursTreeNode>
         if (
           event.affectsConfiguration('odooTimesheet.hoursDailyTarget') ||
           event.affectsConfiguration('odooTimesheet.hoursWorkdays') ||
-          event.affectsConfiguration('odooTimesheet.hoursHolidays')
+          event.affectsConfiguration('odooTimesheet.hoursHolidays') ||
+          event.affectsConfiguration('odooTimesheet.hoursDayTargets') ||
+          event.affectsConfiguration('odooTimesheet.hoursMonthlyTarget') ||
+          event.affectsConfiguration('odooTimesheet.hoursDaysShown')
         ) {
           this.redraw();
         }
@@ -68,11 +111,18 @@ export class HoursTreeProvider implements vscode.TreeDataProvider<HoursTreeNode>
   refresh(): void {
     this.cachedMonth = undefined;
     this.loadError = undefined;
+    this.pageSize = undefined;
     this.emitter.fire();
   }
 
   /** Repinta con las filas que ya están en memoria. */
   redraw(): void {
+    this.emitter.fire();
+  }
+
+  /** Amplía la lista de días en un paso más. */
+  showMore(node: HoursMoreNode): void {
+    this.pageSize = node.shown + basePageSize();
     this.emitter.fire();
   }
 
@@ -85,14 +135,72 @@ export class HoursTreeProvider implements vscode.TreeDataProvider<HoursTreeNode>
     if (!summary) {
       return undefined;
     }
-    // Sin el año: la cabecera es estrecha y siempre es el mes en curso.
+    // Sin el año: la cabecera es estrecha y siempre es el mes en curso. Y
+    // contra el mes entero, igual que la barra: dos cifras distintas para lo
+    // mismo, una arriba y otra dos líneas más abajo, serían un acertijo.
     const month = formatMonthName(summary.month);
-    return summary.expected > 0
-      ? `${month} · ${amount(summary.hours)} / ${formatHours(summary.expected)}`
+    return summary.monthTarget > 0
+      ? `${month} · ${amount(summary.hours)} / ${formatHours(summary.monthTarget)}`
       : `${month} · ${formatHours(summary.hours)}`;
   }
 
   getTreeItem(element: HoursTreeNode): vscode.TreeItem {
+    if (element instanceof HoursBarNode) {
+      const bar = progressBar(element.done, element.target);
+      // La barra va en la etiqueta y no en la descripción, que VS Code pinta
+      // atenuada: es el dato que hay que ver de un vistazo. «Mes» y «Hoy» miden
+      // lo mismo, así que las dos barras quedan alineadas.
+      const item = new vscode.TreeItem(
+        bar ? `${element.caption}  ${bar}` : element.caption,
+        vscode.TreeItemCollapsibleState.None,
+      );
+      item.id = `hours:bar:${element.kind}`;
+      item.contextValue = element.kind === 'month' ? 'hoursMonthBar' : 'hoursTodayBar';
+      item.iconPath = new vscode.ThemeIcon(element.kind === 'month' ? 'calendar' : 'clock');
+
+      if (element.target > 0) {
+        const left = Math.max(0, element.target - element.done);
+        item.description =
+          left > 0
+            ? `${amount(element.done)} / ${formatHours(element.target)} · faltan ${amount(left)}`
+            : `${amount(element.done)} / ${formatHours(element.target)} · cumplida`;
+      } else {
+        item.description = formatHours(element.done);
+      }
+      return item;
+    }
+
+    if (element instanceof HoursDaysNode) {
+      const item = new vscode.TreeItem(
+        'Días',
+        vscode.TreeItemCollapsibleState.Expanded,
+      );
+      // Id fijo: si cambiara entre repintados, VS Code perdería el plegado y la
+      // vista se volvería a desplegar sola cada vez que se refresca.
+      item.id = 'hours:days';
+      item.description =
+        element.shown < element.total ? `${element.shown} de ${element.total}` : `${element.total}`;
+      item.contextValue = 'hoursDays';
+      item.iconPath = new vscode.ThemeIcon('list-flat');
+      return item;
+    }
+
+    if (element instanceof HoursMoreNode) {
+      const item = new vscode.TreeItem('Mostrar más…', vscode.TreeItemCollapsibleState.None);
+      // El id lleva cuántos se muestran para que VS Code no reutilice el nodo
+      // anterior al ampliar la página.
+      item.id = `hours:more:${element.shown}`;
+      item.description = `${element.shown} mostrados`;
+      item.contextValue = 'hoursMore';
+      item.iconPath = new vscode.ThemeIcon('ellipsis');
+      item.command = {
+        command: 'odooTimesheet.showMoreHours',
+        title: 'Mostrar más',
+        arguments: [element],
+      };
+      return item;
+    }
+
     if (element instanceof HoursDayNode) {
       const day = element.summary;
       const item = new vscode.TreeItem(
@@ -120,6 +228,11 @@ export class HoursTreeProvider implements vscode.TreeDataProvider<HoursTreeNode>
             ? `Meta ${formatHours(day.target)} · faltan ${formatHours(day.deficit)}`
             : `Meta ${formatHours(day.target)} · cumplida`,
         );
+        if (day.hasOwnTarget) {
+          tooltip.appendText(' (meta propia de este día)');
+        }
+      } else if (day.hasOwnTarget) {
+        tooltip.appendText('Meta propia de 0 h: no cuenta para la meta');
       } else if (day.isHoliday) {
         tooltip.appendText('Festivo: no cuenta para la meta');
       } else if (!day.isWorkday) {
@@ -136,7 +249,8 @@ export class HoursTreeProvider implements vscode.TreeDataProvider<HoursTreeNode>
   }
 
   async getChildren(element?: HoursTreeNode): Promise<HoursTreeNode[]> {
-    if (element) {
+    // Solo el grupo de días tiene hijos; el resto son hojas.
+    if (element && !(element instanceof HoursDaysNode)) {
       return [];
     }
     if (!this.session.connection) {
@@ -146,16 +260,28 @@ export class HoursTreeProvider implements vscode.TreeDataProvider<HoursTreeNode>
 
     const summary = await this.load();
     if (this.loadError) {
-      return [new HoursInfoNode(this.loadError, 'error')];
+      return element ? [] : [new HoursInfoNode(this.loadError, 'error')];
     }
     if (!summary) {
       return [];
     }
+
+    return element ? this.dayNodes(summary) : this.rootNodes(summary);
+  }
+
+  private rootNodes(summary: MonthSummary): HoursTreeNode[] {
+    const today = summary.today;
+    const nodes: HoursTreeNode[] = [
+      new HoursBarNode('month', summary.hours, summary.monthTarget, 'Mes'),
+      new HoursBarNode('today', today.hours, today.target, 'Hoy', today.day),
+    ];
+
     if (summary.days.length === 0) {
-      return [new HoursInfoNode('Sin horas registradas este mes', 'info')];
+      nodes.push(new HoursInfoNode('Sin horas registradas este mes', 'info'));
+    } else {
+      nodes.push(new HoursDaysNode(this.visibleCount(summary), summary.days.length));
     }
 
-    const nodes: HoursTreeNode[] = summary.days.map((day) => new HoursDayNode(day));
     if (summary.truncated) {
       // Un total incompleto sin avisar es peor que no tener total.
       nodes.push(
@@ -166,6 +292,21 @@ export class HoursTreeProvider implements vscode.TreeDataProvider<HoursTreeNode>
       );
     }
     return nodes;
+  }
+
+  private dayNodes(summary: MonthSummary): HoursTreeNode[] {
+    const shown = this.visibleCount(summary);
+    const nodes: HoursTreeNode[] = summary.days
+      .slice(0, shown)
+      .map((day) => new HoursDayNode(day));
+    if (shown < summary.days.length) {
+      nodes.push(new HoursMoreNode(shown));
+    }
+    return nodes;
+  }
+
+  private visibleCount(summary: MonthSummary): number {
+    return Math.min(this.pageSize ?? basePageSize(), summary.days.length);
   }
 
   /**
@@ -233,13 +374,19 @@ function amount(hours: number): string {
   return formatHours(hours).replace(/ h$/, '');
 }
 
-function readHoursOptions(): { dailyTarget: number; workdays: number[]; holidays: string[] } {
+function readHoursOptions(): Omit<HoursOptions, 'limit'> {
   const config = vscode.workspace.getConfiguration('odooTimesheet');
   return {
     dailyTarget: config.get<number>('hoursDailyTarget', 8),
     workdays: config.get<number[]>('hoursWorkdays', [1, 2, 3, 4, 5, 6]),
     holidays: readHolidays(),
+    dayTargets: readDayTargets(),
+    monthlyTarget: config.get<number>('hoursMonthlyTarget', 0),
   };
+}
+
+function basePageSize(): number {
+  return vscode.workspace.getConfiguration('odooTimesheet').get<number>('hoursDaysShown', 5);
 }
 
 /**

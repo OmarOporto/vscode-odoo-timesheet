@@ -8,7 +8,11 @@ import {
   type RuntimeInfo,
 } from './commands/connect';
 import { diagnoseTasksCommand } from './commands/diagnose';
-import { toggleHolidayCommand } from './commands/hours';
+import {
+  setDayTargetCommand,
+  setMonthlyTargetCommand,
+  toggleHolidayCommand,
+} from './commands/hours';
 import { logTimeCommand } from './commands/logTime';
 import {
   describeTasksView,
@@ -24,7 +28,7 @@ import { OdooSession } from './state';
 import { RegisteredCommitDecorations } from './views/commitDecorations';
 import { CommitNode, CommitsTreeProvider } from './views/commitsTree';
 import { HolidayDecorations } from './views/hoursDecorations';
-import { HoursTreeProvider } from './views/hoursTree';
+import { HoursMoreNode, HoursTreeProvider } from './views/hoursTree';
 import { ProjectNode, ShowMoreNode, TaskNode, TasksTreeProvider } from './views/tasksTree';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -60,9 +64,9 @@ export function activate(context: vscode.ExtensionContext): void {
     treeDataProvider: tasksProvider,
     showCollapseAll: true,
   });
-  // Sin showCollapseAll: la vista de horas es una lista plana.
   const hoursView = vscode.window.createTreeView('odooTimesheet.hours', {
     treeDataProvider: hoursProvider,
+    showCollapseAll: true,
   });
 
   const syncTasksHeader = (): void => {
@@ -165,6 +169,17 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('odooTimesheet.unmarkHoliday', (node?: unknown) =>
       toggleHolidayCommand(node),
     ),
+    vscode.commands.registerCommand('odooTimesheet.setMonthlyTarget', () =>
+      setMonthlyTargetCommand(),
+    ),
+    vscode.commands.registerCommand('odooTimesheet.setDayTarget', (node?: unknown) =>
+      setDayTargetCommand(node),
+    ),
+    vscode.commands.registerCommand('odooTimesheet.showMoreHours', (node?: unknown) => {
+      if (node instanceof HoursMoreNode) {
+        hoursProvider.showMore(node);
+      }
+    }),
 
     vscode.commands.registerCommand('odooTimesheet.selectRepository', () =>
       selectRepositoryCommand(log),
